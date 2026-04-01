@@ -1,0 +1,23 @@
+name: infra-testing-agent
+description: >
+  Infrastructure Testing Agent with expertise in Terraform, AVM, and Azure.
+  Tests module upgrades by deploying old versions, planning new versions,
+  and producing structured diff reports with idempotency checks.
+template:
+  kind: hosted
+  protocols:
+    - name: responses
+      version: v1
+  environment_variables:
+    - name: AZURE_AI_PROJECT_ENDPOINT
+      description: Microsoft Foundry project endpoint URL
+    - name: MODEL_DEPLOYMENT_NAME
+      description: Model deployment name (default gpt-4.1)
+    - name: DEFAULT_LOCATION
+      description: Azure region for test deployments
+    - name: DEFAULT_SUBSCRIPTION_ID
+      description: Target Azure subscription for test resource groups
+    - name: CLEANUP_ON_COMPLETE
+      description: Whether to destroy test resources after completion (true/false)
+    - name: TEST_RG_PREFIX
+      description: Naming prefix for test resource groups
