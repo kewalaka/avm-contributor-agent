@@ -206,7 +206,34 @@ def main() -> None:
         for issue in issues:
             logger.warning("Config: %s", issue)
 
-    if config.foundry_hosted:
+    if config.multi_agent:
+        logger.info("Starting in multi-agent mode")
+        from agents.orchestrator import create_orchestrator
+
+        pipeline = create_orchestrator(
+            mode="foundry" if config.foundry_hosted else "local"
+        )
+        # In multi-agent mode, run the orchestrator as the primary agent
+        # Specialists are available via the pipeline dict
+        orchestrator = pipeline["orchestrator"]
+        specialists = pipeline["specialists"]
+        logger.info(
+            "Pipeline ready: orchestrator + %s",
+            ", ".join(specialists.keys()),
+        )
+
+        if config.foundry_hosted:
+            from runtime.foundry import run as foundry_run
+
+            # For now, run orchestrator like any other agent
+            # Future: wire specialists via A2ATool
+            foundry_run(None, None)
+        else:
+            from runtime.local import run
+
+            run(orchestrator)
+
+    elif config.foundry_hosted:
         logger.info("Starting in Foundry-hosted mode (MCP enabled: %s)", config.has_mcp)
         from runtime.foundry import create_agent, run
 

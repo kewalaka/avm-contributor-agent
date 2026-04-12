@@ -49,6 +49,10 @@ class AgentConfig:
         default_factory=lambda: os.environ.get("FOUNDRY_HOSTED", "false").lower()
         == "true"
     )
+    multi_agent: bool = field(
+        default_factory=lambda: os.environ.get("MULTI_AGENT", "false").lower()
+        == "true"
+    )
 
     def validate(self) -> list[str]:
         """Return a list of missing-but-required settings."""
