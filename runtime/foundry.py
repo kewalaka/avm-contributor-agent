@@ -65,12 +65,12 @@ def _build_mcp_tools() -> list[MCPTool]:
     return tools
 
 
-def create_agent(instructions: str, tools: list) -> PromptAgentDefinition:
+def create_agent(instructions: str) -> tuple[AIProjectClient, PromptAgentDefinition]:
     """Create a Foundry-hosted agent with MCP tools.
 
-    Returns a PromptAgentDefinition that can be used with AIProjectClient.
-    The @ai_function tools are converted to their schema representations
-    and combined with MCP tool declarations.
+    Returns a (client, agent_definition) tuple for use with the Foundry API.
+    MCP tool declarations are built from config; @ai_function tools are
+    registered separately by the runtime.
     """
     credential = DefaultAzureCredential()
     client = AIProjectClient(
@@ -100,6 +100,12 @@ def run(client, agent_def) -> None:
     In hosted mode, the agent is managed by the Foundry platform.
     This function creates a thread and starts processing.
     """
+    # TODO: Wire up proper Foundry thread execution using client & agent_def.
+    # This is a placeholder — full A2A wiring is planned for Phase 4.
+    logger.warning(
+        "Foundry run() is a scaffold; client and agent_def are not yet wired. "
+        "See ROADMAP.md Phase 4 for planned A2A integration."
+    )
     from azure.ai.agentserver.agentframework import from_agent_framework
     from agent_framework import ChatAgent
     from agent_framework.azure import AzureAIAgentClient

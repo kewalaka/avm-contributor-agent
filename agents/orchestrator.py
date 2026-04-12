@@ -9,19 +9,15 @@ and receiving only structured JSON summaries back.
 
 from __future__ import annotations
 
-import json
 import logging
-from dataclasses import asdict
 from typing import Any
 
-from agent_framework import ChatAgent
-
 from agents.base import create_specialist
-from agents.discovery import create_discovery_agent, DISCOVERY_TOOLS
-from agents.deploy import create_deploy_agent, DEPLOY_TOOLS
-from agents.analysis import create_analysis_agent, ANALYSIS_TOOLS
-from agents.reviewer import create_reviewer_agent, REVIEWER_TOOLS
-from agents.reporter import create_reporter_agent, REPORTER_TOOLS
+from agents.discovery import create_discovery_agent
+from agents.deploy import create_deploy_agent
+from agents.analysis import create_analysis_agent
+from agents.reviewer import create_reviewer_agent
+from agents.reporter import create_reporter_agent
 
 logger = logging.getLogger(__name__)
 

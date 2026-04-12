@@ -80,7 +80,11 @@ The agent exposes the following tool groups to the LLM:
 | Reporting | test report, issue body, upgrade doc suggestion | Format findings for output |
 | AVM CLI | run avm commands | Run MUT's own pre-commit, test runners |
 
-## Multi-Agent Mode
+## Multi-Agent Mode ⚠️ Experimental
+
+> **Note:** Multi-agent orchestration is experimental and in active development.
+> Agent-to-agent delegation wiring is planned for Phase 4 (see [ROADMAP.md](ROADMAP.md)).
+> The orchestrator currently runs via the local runtime; Foundry A2A integration is not yet available.
 
 Set `MULTI_AGENT=true` to enable the hub-and-spoke agent topology.
 Each specialist agent has focused instructions and a subset of tools,

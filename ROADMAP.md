@@ -28,8 +28,6 @@ Core tools and module discovery.
 - [ ] Local testing with mock/stub (no Azure dependency)
 - [ ] End-to-end test with a real Foundry project + Application Gateway module
 
-## Phase 2: MCP Integration & Foundry Runtime
-
 ## Phase 2: MCP Integration & Foundry Runtime 🚧
 
 - [x] MCP server declarations (GitHub, Azure, EVA/AzAPI)

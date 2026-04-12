@@ -8,7 +8,6 @@ Dispatches to local or Foundry-hosted runtime based on configuration.
 from __future__ import annotations
 
 import logging
-import os
 
 from dotenv import load_dotenv
 
@@ -222,22 +221,17 @@ def main() -> None:
             ", ".join(specialists.keys()),
         )
 
-        if config.foundry_hosted:
-            from runtime.foundry import run as foundry_run
+        # Multi-agent mode always uses the local runtime for the orchestrator.
+        # Foundry A2A agent delegation is Phase 4 work (see ROADMAP.md).
+        from runtime.local import run
 
-            # For now, run orchestrator like any other agent
-            # Future: wire specialists via A2ATool
-            foundry_run(None, None)
-        else:
-            from runtime.local import run
-
-            run(orchestrator)
+        run(orchestrator)
 
     elif config.foundry_hosted:
         logger.info("Starting in Foundry-hosted mode (MCP enabled: %s)", config.has_mcp)
         from runtime.foundry import create_agent, run
 
-        client, agent_def = create_agent(SYSTEM_INSTRUCTIONS, ALL_TOOLS)
+        client, agent_def = create_agent(SYSTEM_INSTRUCTIONS)
         run(client, agent_def)
     else:
         logger.info("Starting in local mode")

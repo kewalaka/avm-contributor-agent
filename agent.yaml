@@ -30,3 +30,5 @@ template:
       description: Foundry project connection ID for Azure MCP server
     - name: EVA_MCP_SERVER_URL
       description: URL for the EVA/AzAPI MCP server
+    - name: MULTI_AGENT
+      description: Set to 'true' to enable multi-agent orchestration mode
