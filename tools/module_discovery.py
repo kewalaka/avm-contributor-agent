@@ -16,7 +16,7 @@ from pathlib import Path
 from agent_framework import ai_function
 
 from models import ModuleMap
-from tools.terraform import _run, _workspace_path
+from tools.terraform import _workspace_path
 
 
 def _scan_examples(module_root: Path) -> list[str]:
@@ -41,7 +41,10 @@ def _scan_tests(module_root: Path) -> dict[str, list[str]]:
             continue
         files = sorted(
             f.name for f in category_dir.iterdir()
-            if f.is_file() and f.suffix in (".tf", ".tftest.hcl", ".go")
+            if f.is_file() and (
+                f.suffix in (".tf", ".go")
+                or f.name.endswith(".tftest.hcl")
+            )
         )
         if files:
             tests[category_dir.name] = files

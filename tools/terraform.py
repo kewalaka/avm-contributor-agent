@@ -121,10 +121,12 @@ def terraform_init(
     if backend_config:
         try:
             pairs = json.loads(backend_config)
-            for k, v in pairs.items():
-                cmd.append(f"-backend-config={k}={v}")
         except json.JSONDecodeError:
             return json.dumps({"error": "backend_config must be valid JSON"})
+        if not isinstance(pairs, dict):
+            return json.dumps({"error": "backend_config must be a JSON object"})
+        for k, v in pairs.items():
+            cmd.append(f"-backend-config={k}={v}")
     return json.dumps(_run(cmd, ws_path))
 
 
@@ -293,10 +295,12 @@ def terraform_init_upgrade(
     if backend_config:
         try:
             pairs = json.loads(backend_config)
-            for k, v in pairs.items():
-                cmd.append(f"-backend-config={k}={v}")
         except json.JSONDecodeError:
             return json.dumps({"error": "backend_config must be valid JSON"})
+        if not isinstance(pairs, dict):
+            return json.dumps({"error": "backend_config must be a JSON object"})
+        for k, v in pairs.items():
+            cmd.append(f"-backend-config={k}={v}")
     return json.dumps(_run(cmd, ws_path))
 
 
@@ -333,6 +337,8 @@ def run_avm_cli(
     avm_path = ws_path / "avm"
     if not avm_path.is_file():
         return json.dumps({"error": "AVM CLI not found in module directory"})
+    if not os.access(avm_path, os.X_OK):
+        return json.dumps({"error": "AVM CLI exists but is not executable. Run: chmod +x ./avm"})
 
     cmd = [str(avm_path), command]
     return json.dumps(_run(cmd, ws_path, timeout=1800))
@@ -460,6 +466,7 @@ def check_idempotency(
         show_result = _run(show_cmd, ws_path, timeout=60)
 
         details = []
+        parse_failed = False
         if show_result["exit_code"] == 0:
             try:
                 plan_data = json.loads(show_result["stdout"])
@@ -472,13 +479,23 @@ def check_idempotency(
                             "type": rc.get("type", ""),
                         })
             except json.JSONDecodeError:
-                pass
+                parse_failed = True
+        else:
+            parse_failed = True
+
+        change_count = len(details) if not parse_failed else -1
+        message = (
+            f"Idempotency check FAILED — {len(details)} unexpected change(s) detected."
+            if not parse_failed
+            else "Idempotency check FAILED — changes detected but plan details could not be parsed."
+        )
 
         return json.dumps({
             "status": "fail",
-            "unexpected_changes": len(details),
+            "unexpected_changes": change_count,
             "details": details,
-            "message": f"Idempotency check FAILED — {len(details)} unexpected change(s) detected.",
+            "parse_failed": parse_failed,
+            "message": message,
         })
     else:
         return json.dumps({

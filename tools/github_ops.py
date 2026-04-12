@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import subprocess
 
+from agent_framework import ai_function
+
 
 def _gh(args: list[str], timeout: int = 60) -> dict:
     """Run a gh CLI command and return structured output."""
@@ -23,9 +25,6 @@ def _gh(args: list[str], timeout: int = 60) -> dict:
         return {"exit_code": -1, "stdout": "", "stderr": f"gh command timed out after {timeout}s"}
     except FileNotFoundError:
         return {"exit_code": -1, "stdout": "", "stderr": "gh CLI not found — install from https://cli.github.com/"}
-
-
-from agent_framework import ai_function
 
 
 @ai_function
