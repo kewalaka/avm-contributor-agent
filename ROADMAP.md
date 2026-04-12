@@ -1,9 +1,14 @@
 # Infrastructure Testing Agent — Roadmap
 
-## Phase 1: Module Upgrade Testing (current) ✅ scaffolded
+## Architecture
 
-Core capability: deploy an existing AVM module version, plan the upgrade to a
-new version, and produce a structured diff report.
+Three-layer separation: MCP Servers → Testing Agent → Module Under Test (MUT).
+The agent reads skills and knowledge from the MUT at runtime (Read, Don't
+Duplicate). Multi-agent topology planned for phases 3-4.
+
+## Phase 1: Foundation ✅ scaffolded → 🚧 enhanced
+
+Core tools and module discovery.
 
 - [x] Project scaffold (Dockerfile, agent.yaml, config, main.py)
 - [x] Workspace management tools (create, delete, list, read, write files)
@@ -12,50 +17,43 @@ new version, and produce a structured diff report.
 - [x] Analysis tools (summarise plan JSON, read UPGRADE.md)
 - [x] Azure tools (resource group CRUD, identity check, RBAC check)
 - [x] System instructions with workflow conventions
+- [x] Module discovery tools (ingest local, discover structure, read skills)
+- [x] Idempotency check tool (apply → plan → assert empty)
+- [x] Structured plan output (terraform_plan_json)
+- [x] AVM CLI integration (run_avm_cli)
+- [x] GitHub operations (issues, PRs, comments, search via gh CLI)
+- [x] Reporting tools (test reports, issue bodies, UPGRADE.md suggestions)
+- [x] Shared data models (ModuleMap, DeployResult, AnalysisFinding, etc.)
+- [x] Config support for MCP connections and runtime modes
 - [ ] Local testing with mock/stub (no Azure dependency)
-- [ ] Idempotency check workflow (apply → plan → assert empty)
-- [ ] UPGRADE.md cross-reference reporting
-- [ ] Support specifying module examples (not just `default`)
 - [ ] End-to-end test with a real Foundry project + Application Gateway module
 
-## Phase 2: Enhanced Reporting
+## Phase 2: MCP Integration & Foundry Runtime
 
-- [ ] Structured JSON report output (machine-readable)
-- [ ] Markdown report generation (human-readable, suitable for PR comments)
-- [ ] Diff visualisation for plan changes
-- [ ] Cost estimation integration (e.g. Infracost)
-- [ ] Track test history across runs (via Foundry conversations)
+- [ ] MCP server declarations (GitHub, Azure, EVA/AzAPI)
+- [ ] Dual runtime mode (local ChatAgent vs Foundry AIProjectClient)
+- [ ] `runtime/local.py` and `runtime/foundry.py` modules
+- [ ] Connection-based auth for hosted mode
+- [ ] PromptAgentDefinition with structured inputs
 
-## Phase 3: Azure Landing Zone / Generic Module Testing
+## Phase 3: Multi-Agent Orchestration
 
-- [ ] `terraform test` integration (native testing framework)
-- [ ] Post-deploy validation via Azure Resource Graph queries
-- [ ] Integration test runner (deploy module A → check module B can connect)
-- [ ] Parameterised test scenarios (matrix of inputs/examples)
-- [ ] ALZ module dependency graph awareness
-- [ ] Compliance/policy check after deployment (Azure Policy)
+- [ ] Extract agents into `agents/` directory
+- [ ] Orchestrator with agent-as-tools pattern
+- [ ] Concurrent deploy agents (one per example)
+- [ ] Sequential analysis pipeline (Analysis → Reviewer → Reporter)
+- [ ] Structured handoff data between agents
+- [ ] Human-in-the-loop approval gates
 
-## Phase 4: CI/CD & GitHub Integration
+## Phase 4: Full Production
 
-- [ ] GitHub Actions workflow for triggering the agent
-- [ ] GitHub Agentic Workflows integration (when available)
-- [ ] PR comment integration (post test results as PR comments)
-- [ ] Webhook trigger support (deploy on PR open/update)
-- [ ] State management for tracking which module versions have been tested
-
-## Phase 5: Multi-Module & Composition Testing
-
-- [ ] Test module composition (deploy module A + module B together)
-- [ ] Cross-module dependency validation
-- [ ] Landing zone end-to-end deployment pipeline
-- [ ] Environment promotion testing (dev → staging config diffs)
-
-## Phase 6: Intelligence & Learning
-
-- [ ] Learn from previous test runs (common failure patterns)
-- [ ] Auto-generate UPGRADE.md content from plan diffs
-- [ ] Suggest fixes for common Terraform errors
-- [ ] Foundry evaluation integration (track agent quality over time)
+- [ ] A2ATool for published Foundry agents
+- [ ] Agent card discovery
+- [ ] Azure Landing Zone / composition module testing
+- [ ] Cost estimation integration
+- [ ] Compliance/policy checks after deployment
+- [ ] CI/CD triggers (GitHub Actions, webhooks)
+- [ ] Foundry evaluation integration (agent quality tracking)
 
 ## Infrastructure / Ops
 
