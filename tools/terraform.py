@@ -269,6 +269,227 @@ def terraform_test(
 
 
 @ai_function
+def terraform_init_upgrade(
+    workspace_id: str,
+    working_dir: str = ".",
+    backend_config: str = "",
+) -> str:
+    """Run ``terraform init -upgrade`` inside a workspace.
+
+    This variant uses the ``-upgrade`` flag to update provider and module
+    versions, which is required when testing module upgrades or when AVM
+    examples pin minimum versions.
+
+    Args:
+        workspace_id: Workspace id from create_workspace.
+        working_dir: Relative path within the workspace to the root module.
+        backend_config: Optional JSON object of backend config overrides.
+
+    Returns:
+        JSON with exit_code, stdout, stderr.
+    """
+    ws_path = _workspace_path(workspace_id) / working_dir
+    cmd = ["terraform", "init", "-upgrade", "-input=false", "-no-color"]
+    if backend_config:
+        try:
+            pairs = json.loads(backend_config)
+            for k, v in pairs.items():
+                cmd.append(f"-backend-config={k}={v}")
+        except json.JSONDecodeError:
+            return json.dumps({"error": "backend_config must be valid JSON"})
+    return json.dumps(_run(cmd, ws_path))
+
+
+@ai_function
+def run_avm_cli(
+    workspace_id: str,
+    command: str,
+    module_dir: str = "module",
+) -> str:
+    """Run the AVM CLI tool (``./avm``) from a module workspace.
+
+    The AVM template ships an ``avm`` script that wraps common operations
+    like pre-commit checks, PR validation, unit tests, and integration tests.
+    The agent reads this from the MUT rather than embedding its own copy.
+
+    Args:
+        workspace_id: Workspace id from create_workspace.
+        command: AVM CLI command to run (e.g. 'pre-commit', 'tf-test-unit').
+        module_dir: Directory within the workspace containing the module.
+
+    Returns:
+        JSON with exit_code, stdout, stderr.
+    """
+    allowed_commands = {
+        "pre-commit", "pr-check", "tf-test-unit",
+        "tf-test-integration", "tf-test-example", "version",
+    }
+    if command not in allowed_commands:
+        return json.dumps({
+            "error": f"Command '{command}' not allowed. Allowed: {sorted(allowed_commands)}",
+        })
+
+    ws_path = _workspace_path(workspace_id) / module_dir
+    avm_path = ws_path / "avm"
+    if not avm_path.is_file():
+        return json.dumps({"error": "AVM CLI not found in module directory"})
+
+    cmd = [str(avm_path), command]
+    return json.dumps(_run(cmd, ws_path, timeout=1800))
+
+
+@ai_function
+def terraform_plan_json(
+    workspace_id: str,
+    working_dir: str = ".",
+    var_file: str = "",
+    out_file: str = "tfplan",
+) -> str:
+    """Run ``terraform plan``, save the plan, and return a structured JSON summary.
+
+    Combines plan + show in one call to produce structured output suitable
+    for passing to the analysis phase without raw terraform output in context.
+
+    Args:
+        workspace_id: Workspace id from create_workspace.
+        working_dir: Relative path within the workspace to the root module.
+        var_file: Optional path (relative to working_dir) to a .tfvars file.
+        out_file: Name for the saved plan file.
+
+    Returns:
+        JSON with plan_summary (creates/updates/deletes/replaces counts)
+        and resource_changes list, or error details.
+    """
+    ws_path = _workspace_path(workspace_id) / working_dir
+
+    # Run plan
+    plan_cmd = ["terraform", "plan", "-input=false", "-no-color", f"-out={out_file}"]
+    if var_file:
+        plan_cmd.append(f"-var-file={var_file}")
+    plan_result = _run(plan_cmd, ws_path)
+
+    if plan_result["exit_code"] != 0:
+        return json.dumps({"status": "error", "phase": "plan", "details": plan_result})
+
+    # Convert to JSON
+    show_cmd = ["terraform", "show", "-json", "-no-color", out_file]
+    show_result = _run(show_cmd, ws_path, timeout=60)
+
+    if show_result["exit_code"] != 0:
+        return json.dumps({"status": "error", "phase": "show", "details": show_result})
+
+    try:
+        plan_data = json.loads(show_result["stdout"])
+    except json.JSONDecodeError:
+        return json.dumps({"status": "error", "phase": "parse", "details": "Failed to parse plan JSON"})
+
+    # Build structured summary
+    changes = plan_data.get("resource_changes", [])
+    summary = {"creates": 0, "updates": 0, "deletes": 0, "replaces": 0, "no_ops": 0}
+    resource_changes = []
+
+    for rc in changes:
+        actions = rc.get("change", {}).get("actions", [])
+        addr = rc.get("address", "unknown")
+        entry = {"address": addr, "type": rc.get("type", ""), "actions": actions}
+
+        if actions == ["no-op"] or actions == ["read"]:
+            summary["no_ops"] += 1
+        elif actions == ["create"]:
+            summary["creates"] += 1
+            resource_changes.append(entry)
+        elif actions == ["delete"]:
+            summary["deletes"] += 1
+            resource_changes.append(entry)
+        elif actions == ["update"]:
+            summary["updates"] += 1
+            resource_changes.append(entry)
+        elif "delete" in actions and "create" in actions:
+            summary["replaces"] += 1
+            resource_changes.append(entry)
+        else:
+            resource_changes.append(entry)
+
+    return json.dumps({
+        "status": "success",
+        "plan_file": out_file,
+        "summary": summary,
+        "total_changes": summary["creates"] + summary["updates"] + summary["deletes"] + summary["replaces"],
+        "resource_changes": resource_changes,
+    }, indent=2)
+
+
+@ai_function
+def check_idempotency(
+    workspace_id: str,
+    working_dir: str = ".",
+    var_file: str = "",
+) -> str:
+    """Run a terraform plan after apply to check idempotency.
+
+    A well-written module should produce an empty plan after apply.
+    Any unexpected changes indicate an idempotency issue.
+
+    Args:
+        workspace_id: Workspace id from create_workspace.
+        working_dir: Relative path within the workspace to the root module.
+        var_file: Optional .tfvars file.
+
+    Returns:
+        JSON with idempotency status (pass/fail), unexpected change count,
+        and details of any non-empty plan resources.
+    """
+    ws_path = _workspace_path(workspace_id) / working_dir
+    plan_cmd = ["terraform", "plan", "-input=false", "-no-color", "-detailed-exitcode", "-out=idempotency-check"]
+    if var_file:
+        plan_cmd.append(f"-var-file={var_file}")
+
+    result = _run(plan_cmd, ws_path)
+
+    # Exit code 0 = empty plan (pass), 2 = changes detected (fail), other = error
+    if result["exit_code"] == 0:
+        return json.dumps({
+            "status": "pass",
+            "unexpected_changes": 0,
+            "details": [],
+            "message": "Idempotency check passed — no changes detected after apply.",
+        })
+    elif result["exit_code"] == 2:
+        # Parse the plan to get details of unexpected changes
+        show_cmd = ["terraform", "show", "-json", "-no-color", "idempotency-check"]
+        show_result = _run(show_cmd, ws_path, timeout=60)
+
+        details = []
+        if show_result["exit_code"] == 0:
+            try:
+                plan_data = json.loads(show_result["stdout"])
+                for rc in plan_data.get("resource_changes", []):
+                    actions = rc.get("change", {}).get("actions", [])
+                    if actions not in [["no-op"], ["read"]]:
+                        details.append({
+                            "address": rc.get("address", "unknown"),
+                            "actions": actions,
+                            "type": rc.get("type", ""),
+                        })
+            except json.JSONDecodeError:
+                pass
+
+        return json.dumps({
+            "status": "fail",
+            "unexpected_changes": len(details),
+            "details": details,
+            "message": f"Idempotency check FAILED — {len(details)} unexpected change(s) detected.",
+        })
+    else:
+        return json.dumps({
+            "status": "error",
+            "unexpected_changes": 0,
+            "details": [],
+            "message": f"Idempotency check error: {result['stderr'][-500:]}",
+        })
+
+
+@ai_function
 def list_workspace_files(
     workspace_id: str,
     relative_path: str = ".",
