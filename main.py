@@ -2,21 +2,22 @@
 
 A hosted agent built with the Microsoft Agent Framework that tests
 Terraform modules by deploying, planning, and analysing diffs.
-Supports local development and Foundry-hosted modes.
+Dispatches to local or Foundry-hosted runtime based on configuration.
 """
 
 from __future__ import annotations
 
-import os
+import logging
 
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-from agent_framework import ChatAgent
-from agent_framework.azure import AzureAIAgentClient
-from azure.ai.agentserver.agentframework import from_agent_framework
-from azure.identity import DefaultAzureCredential
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 from config import config
 
@@ -196,15 +197,49 @@ ALL_TOOLS = [
     generate_upgrade_doc_suggestion,
 ]
 
-agent = ChatAgent(
-    chat_client=AzureAIAgentClient(
-        project_endpoint=config.project_endpoint,
-        model_deployment_name=config.model_deployment_name,
-        credential=DefaultAzureCredential(),
-    ),
-    instructions=SYSTEM_INSTRUCTIONS,
-    tools=ALL_TOOLS,
-)
+
+def main() -> None:
+    """Select runtime and start the agent."""
+    issues = config.validate()
+    if issues:
+        for issue in issues:
+            logger.warning("Config: %s", issue)
+
+    if config.multi_agent:
+        logger.info("Starting in multi-agent mode")
+        from agents.orchestrator import create_orchestrator
+
+        pipeline = create_orchestrator(
+            mode="foundry" if config.foundry_hosted else "local"
+        )
+        # In multi-agent mode, run the orchestrator as the primary agent
+        # Specialists are available via the pipeline dict
+        orchestrator = pipeline["orchestrator"]
+        specialists = pipeline["specialists"]
+        logger.info(
+            "Pipeline ready: orchestrator + %s",
+            ", ".join(specialists.keys()),
+        )
+
+        # Multi-agent mode always uses the local runtime for the orchestrator.
+        # Foundry A2A agent delegation is Phase 4 work (see ROADMAP.md).
+        from runtime.local import run
+
+        run(orchestrator)
+
+    elif config.foundry_hosted:
+        logger.info("Starting in Foundry-hosted mode (MCP enabled: %s)", config.has_mcp)
+        from runtime.foundry import create_agent, run
+
+        client, agent_def = create_agent(SYSTEM_INSTRUCTIONS)
+        run(client, agent_def)
+    else:
+        logger.info("Starting in local mode")
+        from runtime.local import create_agent, run
+
+        agent = create_agent(SYSTEM_INSTRUCTIONS, ALL_TOOLS)
+        run(agent)
+
 
 if __name__ == "__main__":
-    from_agent_framework(agent).run()
+    main()

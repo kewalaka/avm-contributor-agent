@@ -3,6 +3,7 @@ description: >
   Infrastructure Testing Agent with expertise in Terraform, AVM, and Azure.
   Tests module upgrades by deploying old versions, planning new versions,
   and producing structured diff reports with idempotency checks.
+  Supports MCP server integration for GitHub, Azure, and EVA/AzAPI.
 template:
   kind: hosted
   protocols:
@@ -21,3 +22,13 @@ template:
       description: Whether to destroy test resources after completion (true/false)
     - name: TEST_RG_PREFIX
       description: Naming prefix for test resource groups
+    - name: FOUNDRY_HOSTED
+      description: Set to 'true' to enable Foundry-hosted mode with MCP support
+    - name: GITHUB_MCP_CONNECTION_ID
+      description: Foundry project connection ID for GitHub MCP server
+    - name: AZURE_MCP_CONNECTION_ID
+      description: Foundry project connection ID for Azure MCP server
+    - name: EVA_MCP_SERVER_URL
+      description: URL for the EVA/AzAPI MCP server
+    - name: MULTI_AGENT
+      description: Set to 'true' to enable multi-agent orchestration mode

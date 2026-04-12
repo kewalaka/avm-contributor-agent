@@ -28,22 +28,27 @@ Core tools and module discovery.
 - [ ] Local testing with mock/stub (no Azure dependency)
 - [ ] End-to-end test with a real Foundry project + Application Gateway module
 
-## Phase 2: MCP Integration & Foundry Runtime
+## Phase 2: MCP Integration & Foundry Runtime 🚧
 
-- [ ] MCP server declarations (GitHub, Azure, EVA/AzAPI)
-- [ ] Dual runtime mode (local ChatAgent vs Foundry AIProjectClient)
-- [ ] `runtime/local.py` and `runtime/foundry.py` modules
-- [ ] Connection-based auth for hosted mode
+- [x] MCP server declarations (GitHub, Azure, EVA/AzAPI)
+- [x] Dual runtime mode (local ChatAgent vs Foundry AIProjectClient)
+- [x] `runtime/local.py` and `runtime/foundry.py` modules
+- [x] Connection-based auth for hosted mode
 - [ ] PromptAgentDefinition with structured inputs
+- [ ] End-to-end test with MCP servers connected
 
-## Phase 3: Multi-Agent Orchestration
+## Phase 3: Multi-Agent Orchestration 🚧
 
-- [ ] Extract agents into `agents/` directory
-- [ ] Orchestrator with agent-as-tools pattern
+- [x] Extract agents into `agents/` directory
+- [x] Orchestrator with agent-as-tools pattern
+- [x] Specialist agents: Discovery, Deploy, Analysis, Reviewer, Reporter
+- [x] Focused instructions and tool subsets per agent
+- [x] Structured handoff data between agents (via models.py)
+- [x] MULTI_AGENT config flag for progressive adoption
 - [ ] Concurrent deploy agents (one per example)
 - [ ] Sequential analysis pipeline (Analysis → Reviewer → Reporter)
-- [ ] Structured handoff data between agents
 - [ ] Human-in-the-loop approval gates
+- [ ] Agent-as-tool wiring (ChatAgent.as_tool() integration)
 
 ## Phase 4: Full Production
 

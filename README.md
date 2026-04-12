@@ -59,6 +59,7 @@ The agent listens on `http://localhost:8088` and exposes an OpenAI Responses-com
 | `CLEANUP_ON_COMPLETE` | No | `true` | Destroy resources after testing |
 | `TEST_RG_PREFIX` | No | `rg-avm-test-` | Prefix for test resource groups |
 | `FOUNDRY_HOSTED` | No | `false` | Enable Foundry-hosted mode with MCP |
+| `MULTI_AGENT` | No | `false` | Enable multi-agent orchestration mode |
 | `GITHUB_MCP_CONNECTION_ID` | No | — | Foundry connection for GitHub MCP |
 | `AZURE_MCP_CONNECTION_ID` | No | — | Foundry connection for Azure MCP |
 | `EVA_MCP_SERVER_URL` | No | — | EVA/AzAPI MCP server endpoint |
@@ -78,6 +79,38 @@ The agent exposes the following tool groups to the LLM:
 | GitHub | create issue, create PR, add comment, search issues, get release | File bugs and propose changes |
 | Reporting | test report, issue body, upgrade doc suggestion | Format findings for output |
 | AVM CLI | run avm commands | Run MUT's own pre-commit, test runners |
+
+## Multi-Agent Mode ⚠️ Experimental
+
+> **Note:** Multi-agent orchestration is experimental and in active development.
+> Agent-to-agent delegation wiring is planned for Phase 4 (see [ROADMAP.md](ROADMAP.md)).
+> The orchestrator currently runs via the local runtime; Foundry A2A integration is not yet available.
+
+Set `MULTI_AGENT=true` to enable the hub-and-spoke agent topology.
+Each specialist agent has focused instructions and a subset of tools,
+keeping context small and avoiding fog from large terraform outputs.
+
+```
+                 Orchestrator
+                /   |    |    \
+         Discovery Deploy(n) Analysis
+                              |
+                           Reviewer
+                              |
+                           Reporter
+```
+
+| Agent | Role | Tools |
+|-------|------|-------|
+| **Orchestrator** | Owns test plan, delegates work | None (delegates only) |
+| **Discovery** | Scans MUT structure, skills, examples | workspace, git, module_discovery |
+| **Deploy** | Runs TF lifecycle per example (concurrent) | workspace, terraform, azure |
+| **Analysis** | Reviews deploy results vs UPGRADE.md | analysis, module_discovery, reporting |
+| **Reviewer** | Cross-checks findings with fresh context | analysis, module_discovery |
+| **Reporter** | Files issues, generates reports | github_ops, reporting |
+
+Data flows as structured JSON (see `models.py`) between agents --
+raw terraform output stays in the deploy agent and is never passed through.
 
 ## Docker
 
