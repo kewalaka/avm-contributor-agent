@@ -30,11 +30,14 @@ Core tools and module discovery.
 
 ## Phase 2: MCP Integration & Foundry Runtime
 
-- [ ] MCP server declarations (GitHub, Azure, EVA/AzAPI)
-- [ ] Dual runtime mode (local ChatAgent vs Foundry AIProjectClient)
-- [ ] `runtime/local.py` and `runtime/foundry.py` modules
-- [ ] Connection-based auth for hosted mode
+## Phase 2: MCP Integration & Foundry Runtime 🚧
+
+- [x] MCP server declarations (GitHub, Azure, EVA/AzAPI)
+- [x] Dual runtime mode (local ChatAgent vs Foundry AIProjectClient)
+- [x] `runtime/local.py` and `runtime/foundry.py` modules
+- [x] Connection-based auth for hosted mode
 - [ ] PromptAgentDefinition with structured inputs
+- [ ] End-to-end test with MCP servers connected
 
 ## Phase 3: Multi-Agent Orchestration
 
