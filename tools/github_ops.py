@@ -186,3 +186,127 @@ def get_latest_release(
         except json.JSONDecodeError:
             return json.dumps({"status": "error", "details": "Failed to parse release info"})
     return json.dumps({"status": "error", "details": result})
+
+
+@ai_function
+def download_workflow_artifacts(
+    repo: str,
+    run_id: str = "",
+    artifact_name: str = "test-report",
+    output_dir: str = "./artifacts",
+) -> str:
+    """Download artifacts from a GitHub Actions workflow run.
+
+    This bridges GHA deploy results with the agent analysis pipeline.
+    The GHA workflow uploads per-example deploy results and plan JSONs
+    as artifacts. This tool retrieves them for the agent to analyse.
+
+    Args:
+        repo: Repository in owner/repo format.
+        run_id: Workflow run ID. If empty, uses the latest completed run.
+        artifact_name: Name of the artifact to download (default 'test-report').
+        output_dir: Local directory to save artifacts to.
+
+    Returns:
+        JSON with download status and list of downloaded files.
+    """
+    import os
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    if run_id:
+        cmd = [
+            "run", "download",
+            "--repo", repo,
+            run_id,
+            "--name", artifact_name,
+            "--dir", output_dir,
+        ]
+    else:
+        # Find latest completed run of the Module Test workflow
+        list_cmd = [
+            "run", "list",
+            "--repo", repo,
+            "--workflow", "run-test.yml",
+            "--status", "completed",
+            "--limit", "1",
+            "--json", "databaseId",
+        ]
+        list_result = _gh(list_cmd)
+        if list_result["exit_code"] != 0:
+            return json.dumps({"status": "error", "details": "Could not find workflow runs", "gh": list_result})
+        try:
+            runs = json.loads(list_result["stdout"])
+            if not runs:
+                return json.dumps({"status": "error", "details": "No completed workflow runs found"})
+            run_id = str(runs[0]["databaseId"])
+        except (json.JSONDecodeError, KeyError, IndexError):
+            return json.dumps({"status": "error", "details": "Could not parse workflow runs"})
+
+        cmd = [
+            "run", "download",
+            "--repo", repo,
+            run_id,
+            "--name", artifact_name,
+            "--dir", output_dir,
+        ]
+
+    result = _gh(cmd, timeout=120)
+    if result["exit_code"] != 0:
+        return json.dumps({"status": "error", "details": result})
+
+    # List downloaded files
+    downloaded = []
+    for root, _, files in os.walk(output_dir):
+        for f in files:
+            rel_path = os.path.relpath(os.path.join(root, f), output_dir)
+            downloaded.append(rel_path)
+
+    return json.dumps({
+        "status": "downloaded",
+        "run_id": run_id,
+        "artifact": artifact_name,
+        "files": downloaded,
+        "output_dir": output_dir,
+    })
+
+
+@ai_function
+def get_workflow_run_status(
+    repo: str,
+    run_id: str = "",
+    workflow: str = "run-test.yml",
+) -> str:
+    """Check the status of a GitHub Actions workflow run.
+
+    Args:
+        repo: Repository in owner/repo format.
+        run_id: Specific run ID to check. If empty, shows recent runs.
+        workflow: Workflow filename to filter by.
+
+    Returns:
+        JSON with run status, conclusion, and job details.
+    """
+    if run_id:
+        cmd = [
+            "run", "view",
+            "--repo", repo,
+            run_id,
+            "--json", "databaseId,status,conclusion,workflowName,createdAt,updatedAt,jobs",
+        ]
+    else:
+        cmd = [
+            "run", "list",
+            "--repo", repo,
+            "--workflow", workflow,
+            "--limit", "5",
+            "--json", "databaseId,status,conclusion,workflowName,createdAt,headBranch",
+        ]
+
+    result = _gh(cmd)
+    if result["exit_code"] == 0:
+        try:
+            return result["stdout"]
+        except json.JSONDecodeError:
+            return json.dumps({"status": "error", "details": "Failed to parse run info"})
+    return json.dumps({"status": "error", "details": result})

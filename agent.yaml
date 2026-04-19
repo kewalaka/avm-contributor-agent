@@ -36,3 +36,5 @@ template:
       description: Comma-separated GitHub orgs whose modules are auto-approved
     - name: TRUSTED_REGISTRY
       description: Comma-separated Terraform registry namespaces that are auto-approved
+    - name: TRACKING_DB_PATH
+      description: Path to SQLite tracking database (default tracking.db)

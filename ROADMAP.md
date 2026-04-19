@@ -45,6 +45,15 @@ Core tools and module discovery.
 - [x] Focused instructions and tool subsets per agent
 - [x] Structured handoff data between agents (via models.py)
 - [x] MULTI_AGENT config flag for progressive adoption
+- [x] TestRequest input contract (request.py)
+- [x] Security policy enforcement (policy.py, ModuleAllowlist)
+- [x] CLI batch mode (--request / --module)
+- [x] Default to testing ALL examples (with include/skip filtering)
+- [x] JSON report output alongside markdown
+- [x] GitHub Actions reusable workflow (discover → deploy matrix → summarise)
+- [x] GHA analysis bridge (download_workflow_artifacts, get_workflow_run_status)
+- [x] Tracking database (SQLite) for longitudinal test results
+- [x] Module health tracking (consecutive failures, last status)
 - [ ] Concurrent deploy agents (one per example)
 - [ ] Sequential analysis pipeline (Analysis → Reviewer → Reporter)
 - [ ] Human-in-the-loop approval gates

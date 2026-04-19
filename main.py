@@ -80,6 +80,16 @@ from tools.reporting import (
     generate_test_report,
     generate_upgrade_doc_suggestion,
 )
+from tools.github_ops import (
+    download_workflow_artifacts,
+    get_workflow_run_status,
+)
+from tools.tracking import (
+    query_findings,
+    query_module_health,
+    query_test_history,
+    store_test_run,
+)
 
 SYSTEM_INSTRUCTIONS = """\
 You are an Infrastructure Testing Agent with expertise in Terraform, \
