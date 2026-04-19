@@ -24,6 +24,83 @@ def _git(args: list[str], cwd: str | Path, timeout: int = 120) -> dict:
 
 
 @ai_function
+def git_switch_ref(
+    workspace_id: str,
+    ref: str,
+    target_dir: str = "module",
+    fetch_depth: int = 50,
+) -> str:
+    """Switch an already-cloned repository to a different branch, tag, or commit.
+
+    Unlike a plain ``git checkout``, this tool fetches the target ref first
+    so it works even when the initial clone was shallow or single-branch.
+    The checkout is always detached (deterministic, no local branch state).
+
+    Use this to switch between base_ref and head_ref during upgrade testing.
+
+    Args:
+        workspace_id: Workspace id from create_workspace.
+        ref: Branch name, tag, or commit SHA to switch to.
+        target_dir: Directory within the workspace containing the clone.
+        fetch_depth: How many commits to fetch (default 50, use 0 for full).
+
+    Returns:
+        JSON with fetch and checkout results plus the resolved commit SHA.
+    """
+    ws_path = _workspace_path(workspace_id) / target_dir
+
+    if not (ws_path / ".git").exists():
+        return json.dumps({"error": f"No git repo found at {target_dir}"})
+
+    # Fetch the ref (handles shallow clones that don't have other branches)
+    fetch_cmd = ["fetch", "origin", ref]
+    if fetch_depth > 0:
+        fetch_cmd.extend(["--depth", str(fetch_depth)])
+    fetch_result = _git(fetch_cmd, ws_path)
+
+    if fetch_result["exit_code"] != 0:
+        # Try fetching tags in case ref is a tag like v0.5.0
+        tag_fetch = _git(["fetch", "origin", "--tags"], ws_path)
+        if tag_fetch["exit_code"] != 0:
+            return json.dumps({
+                "error": f"Could not fetch ref '{ref}'",
+                "fetch_result": fetch_result,
+                "tag_fetch_result": tag_fetch,
+            })
+
+    # Clean working tree before switching (remove untracked TF artifacts)
+    _git(["clean", "-fd"], ws_path)
+    _git(["checkout", "--", "."], ws_path)
+
+    # Checkout detached to the fetched ref
+    # Try FETCH_HEAD first (from the direct fetch), then the ref name
+    checkout_result = _git(["checkout", "--detach", "FETCH_HEAD"], ws_path)
+    if checkout_result["exit_code"] != 0:
+        checkout_result = _git(["checkout", "--detach", ref], ws_path)
+
+    if checkout_result["exit_code"] != 0:
+        # Last resort: try origin/ref
+        checkout_result = _git(["checkout", "--detach", f"origin/{ref}"], ws_path)
+
+    if checkout_result["exit_code"] != 0:
+        return json.dumps({
+            "error": f"Could not checkout ref '{ref}'",
+            "checkout_result": checkout_result,
+        })
+
+    # Get the resolved commit SHA
+    rev_result = _git(["rev-parse", "HEAD"], ws_path)
+    commit_sha = rev_result["stdout"].strip() if rev_result["exit_code"] == 0 else "unknown"
+
+    return json.dumps({
+        "status": "switched",
+        "ref": ref,
+        "commit_sha": commit_sha,
+        "detached": True,
+    })
+
+
+@ai_function
 def clone_repo(
     workspace_id: str,
     repo_url: str,

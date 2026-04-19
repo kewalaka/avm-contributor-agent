@@ -54,6 +54,15 @@ Core tools and module discovery.
 - [x] GHA analysis bridge (download_workflow_artifacts, get_workflow_run_status)
 - [x] Tracking database (SQLite) for longitudinal test results
 - [x] Module health tracking (consecutive failures, last status)
+- [x] **Upgrade testing workflow** (core value proposition):
+  - [x] `git_switch_ref` tool (fetch + detached checkout for shallow clones)
+  - [x] `run_upgrade_test` deterministic tool (two-phase lifecycle per example)
+  - [x] TF_DATA_DIR isolation (ref switching does not contaminate provider state)
+  - [x] Confidence levels (high/medium/low based on base idempotency)
+  - [x] Deploy agent two-mode instructions (simple deploy vs upgrade test)
+  - [x] Orchestrator upgrade flow instructions (when head_ref is set)
+  - [x] Analysis agent upgrade cross-referencing (diff vs UPGRADE.md)
+  - [x] GHA workflow two-phase deploy (base deploy → head plan diff)
 - [ ] Concurrent deploy agents (one per example)
 - [ ] Sequential analysis pipeline (Analysis → Reviewer → Reporter)
 - [ ] Human-in-the-loop approval gates

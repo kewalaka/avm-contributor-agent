@@ -174,6 +174,9 @@ jobs:
 
   # ------------------------------------------------------------------
   # Deploy: run terraform for each example (matrix)
+  # Supports two modes:
+  #   - Simple deploy (no head_ref): deploy at base_ref
+  #   - Upgrade test (head_ref set): deploy at base_ref, then plan at head_ref
   # ------------------------------------------------------------------
   deploy:
     name: "Deploy: ${{ matrix.example }}"
@@ -196,12 +199,9 @@ jobs:
           if [[ ! "$MODULE_SOURCE" == https://* ]]; then
             MODULE_SOURCE="https://github.com/${MODULE_SOURCE}.git"
           fi
-          git clone "$MODULE_SOURCE" module-under-test
-          if [[ -n "${{ inputs.head_ref }}" ]]; then
-            cd module-under-test && git checkout "${{ inputs.head_ref }}"
-          elif [[ "${{ inputs.base_ref }}" != "main" ]]; then
-            cd module-under-test && git checkout "${{ inputs.base_ref }}"
-          fi
+          # Deep clone needed to switch between refs for upgrade testing
+          git clone --depth 100 "$MODULE_SOURCE" module-under-test
+          cd module-under-test && git checkout "${{ inputs.base_ref }}"
 
       - name: Azure login (OIDC)
         uses: azure/login@v2
@@ -215,63 +215,117 @@ jobs:
         with:
           terraform_wrapper: false
 
-      - name: Terraform init
-        id: init
+      # Externalize TF_DATA_DIR so ref switching does not contaminate state
+      - name: Set TF_DATA_DIR
+        run: |
+          TF_DATA="$RUNNER_TEMP/tf-data-${{ matrix.example }}"
+          mkdir -p "$TF_DATA"
+          echo "TF_DATA_DIR=$TF_DATA" >> "$GITHUB_ENV"
+
+      # ----- Phase 1: Deploy at base_ref -----
+      - name: "Base: terraform init"
+        id: base_init
         working-directory: module-under-test/examples/${{ matrix.example }}
-        run: terraform init -upgrade -no-color 2>&1 | tee init.log
+        run: terraform init -input=false -no-color 2>&1 | tee init-base.log
         continue-on-error: true
 
-      - name: Terraform plan
-        id: plan
-        if: steps.init.outcome == 'success'
+      - name: "Base: terraform plan"
+        id: base_plan
+        if: steps.base_init.outcome == 'success'
         working-directory: module-under-test/examples/${{ matrix.example }}
         run: |
-          terraform plan -out=tfplan -no-color 2>&1 | tee plan.log
-          terraform show -json tfplan > plan.json 2>/dev/null || true
+          terraform plan -out=tfplan-base -input=false -no-color 2>&1 | tee plan-base.log
+          terraform show -json tfplan-base > plan-base.json 2>/dev/null || true
         continue-on-error: true
 
-      - name: Terraform apply
-        id: apply
-        if: steps.plan.outcome == 'success'
+      - name: "Base: terraform apply"
+        id: base_apply
+        if: steps.base_plan.outcome == 'success'
         working-directory: module-under-test/examples/${{ matrix.example }}
-        run: terraform apply -auto-approve -no-color tfplan 2>&1 | tee apply.log
+        run: terraform apply -auto-approve -input=false -no-color tfplan-base 2>&1 | tee apply-base.log
         continue-on-error: true
 
-      - name: Idempotency check
-        id: idempotency
-        if: steps.apply.outcome == 'success'
+      - name: "Base: idempotency check"
+        id: base_idempotency
+        if: steps.base_apply.outcome == 'success'
         working-directory: module-under-test/examples/${{ matrix.example }}
         run: |
-          terraform plan -detailed-exitcode -no-color 2>&1 | tee idempotency.log
+          set +e
+          terraform plan -detailed-exitcode -input=false -no-color 2>&1 | tee idempotency.log
           EXITCODE=$?
+          set -e
           if [[ $EXITCODE -eq 0 ]]; then
             echo "status=pass" >> "$GITHUB_OUTPUT"
           elif [[ $EXITCODE -eq 2 ]]; then
             echo "status=fail" >> "$GITHUB_OUTPUT"
-            terraform show -json tfplan > idempotency-plan.json 2>/dev/null || true
+            terraform plan -out=idem-plan -input=false -no-color > /dev/null 2>&1 || true
+            terraform show -json idem-plan > idempotency-plan.json 2>/dev/null || true
           else
             echo "status=error" >> "$GITHUB_OUTPUT"
           fi
         continue-on-error: true
 
-      - name: Terraform destroy
-        if: inputs.cleanup == 'true' && steps.apply.outcome == 'success'
+      # ----- Phase 2: Upgrade diff at head_ref (only when head_ref is set) -----
+      - name: "Upgrade: switch to head_ref"
+        id: switch_head
+        if: inputs.head_ref != '' && steps.base_apply.outcome == 'success'
+        working-directory: module-under-test
+        run: |
+          git fetch origin "${{ inputs.head_ref }}" --depth 100
+          git checkout --detach FETCH_HEAD || git checkout --detach "${{ inputs.head_ref }}" || git checkout --detach "origin/${{ inputs.head_ref }}"
+          HEAD_SHA=$(git rev-parse HEAD)
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "Switched to head_ref: ${{ inputs.head_ref }} ($HEAD_SHA)"
+
+      - name: "Upgrade: terraform init -upgrade"
+        id: upgrade_init
+        if: steps.switch_head.outcome == 'success'
         working-directory: module-under-test/examples/${{ matrix.example }}
-        run: terraform destroy -auto-approve -no-color 2>&1 | tee destroy.log
+        run: terraform init -upgrade -input=false -no-color 2>&1 | tee init-upgrade.log
         continue-on-error: true
 
+      - name: "Upgrade: terraform plan (diff only, do NOT apply)"
+        id: upgrade_plan
+        if: steps.upgrade_init.outcome == 'success'
+        working-directory: module-under-test/examples/${{ matrix.example }}
+        run: |
+          terraform plan -out=upgrade-plan -input=false -no-color 2>&1 | tee plan-upgrade.log
+          terraform show -json upgrade-plan > plan-upgrade.json 2>/dev/null || true
+        continue-on-error: true
+
+      # ----- Cleanup: always destroy -----
+      # Switch back to head_ref state for destroy (resources match head if upgrade was partial)
+      - name: Terraform destroy
+        if: inputs.cleanup == 'true' && steps.base_apply.outcome == 'success'
+        working-directory: module-under-test/examples/${{ matrix.example }}
+        run: terraform destroy -auto-approve -input=false -no-color 2>&1 | tee destroy.log
+        continue-on-error: true
+
+      # ----- Build result artifact -----
       - name: Build deploy result
         if: always()
         run: |
           mkdir -p results
+          IS_UPGRADE=$([[ -n "${{ inputs.head_ref }}" ]] && echo "true" || echo "false")
           cat > results/${{ matrix.example }}.json <<RESULT
           {
             "example": "${{ matrix.example }}",
-            "init_status": "${{ steps.init.outcome }}",
-            "plan_status": "${{ steps.plan.outcome }}",
-            "apply_status": "${{ steps.apply.outcome }}",
-            "idempotency_status": "${{ steps.idempotency.outputs.status || 'skipped' }}",
-            "status": "${{ steps.apply.outcome == 'success' && 'success' || 'failure' }}"
+            "test_mode": $([[ "$IS_UPGRADE" == "true" ]] && echo '"upgrade"' || echo '"deploy"'),
+            "base_ref": "${{ inputs.base_ref }}",
+            "head_ref": "${{ inputs.head_ref }}",
+            "base_deploy": {
+              "init_status": "${{ steps.base_init.outcome }}",
+              "plan_status": "${{ steps.base_plan.outcome }}",
+              "apply_status": "${{ steps.base_apply.outcome }}",
+              "idempotency_status": "${{ steps.base_idempotency.outputs.status || 'skipped' }}"
+            },
+            "upgrade": {
+              "switch_status": "${{ steps.switch_head.outcome || 'skipped' }}",
+              "head_sha": "${{ steps.switch_head.outputs.head_sha || '' }}",
+              "init_status": "${{ steps.upgrade_init.outcome || 'skipped' }}",
+              "plan_status": "${{ steps.upgrade_plan.outcome || 'skipped' }}"
+            },
+            "status": "${{ steps.base_apply.outcome == 'success' && 'success' || 'failure' }}"
           }
           RESULT
 
@@ -283,12 +337,20 @@ jobs:
           path: results/${{ matrix.example }}.json
           retention-days: 30
 
-      - name: Upload plan JSON
-        if: steps.plan.outcome == 'success'
+      - name: Upload base plan JSON
+        if: steps.base_plan.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: plan-json-${{ matrix.example }}
-          path: module-under-test/examples/${{ matrix.example }}/plan.json
+          name: plan-base-${{ matrix.example }}
+          path: module-under-test/examples/${{ matrix.example }}/plan-base.json
+          retention-days: 30
+
+      - name: Upload upgrade plan JSON
+        if: steps.upgrade_plan.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-upgrade-${{ matrix.example }}
+          path: module-under-test/examples/${{ matrix.example }}/plan-upgrade.json
           retention-days: 30
 
   # ------------------------------------------------------------------
@@ -309,16 +371,27 @@ jobs:
 
       - name: Build summary report
         run: |
+          IS_UPGRADE=$([[ -n "${{ inputs.head_ref }}" ]] && echo "true" || echo "false")
+
           echo "# Module Test Report" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Module:** \`${{ inputs.module_source }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Base:** ${{ inputs.base_ref }}" >> "$GITHUB_STEP_SUMMARY"
-          if [[ -n "${{ inputs.head_ref }}" ]]; then
+          if [[ "$IS_UPGRADE" == "true" ]]; then
             echo "**Head:** ${{ inputs.head_ref }}" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Mode:** Upgrade test (deploy base, plan diff at head)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "**Mode:** Simple deploy" >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Example | Deploy | Idempotency |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|---------|--------|-------------|" >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$IS_UPGRADE" == "true" ]]; then
+            echo "| Example | Base Deploy | Base Idempotency | Upgrade Init | Upgrade Plan |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|---------|------------|------------------|-------------|-------------|" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| Example | Deploy | Idempotency |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|---------|--------|-------------|" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
           PASS=0
           FAIL=0
@@ -328,12 +401,23 @@ jobs:
             if [[ -f "$f" ]]; then
               EXAMPLE=$(jq -r '.example' "$f")
               STATUS=$(jq -r '.status' "$f")
-              IDEMP=$(jq -r '.idempotency_status' "$f")
-              STATUS_ICON=$([[ "$STATUS" == "success" ]] && echo "✅" || echo "❌")
-              IDEMP_ICON=$([[ "$IDEMP" == "pass" ]] && echo "✅" || ([[ "$IDEMP" == "skipped" ]] && echo "⏭️" || echo "❌"))
-              echo "| $EXAMPLE | $STATUS_ICON $STATUS | $IDEMP_ICON $IDEMP |" >> "$GITHUB_STEP_SUMMARY"
               TOTAL=$((TOTAL + 1))
               if [[ "$STATUS" == "success" ]]; then PASS=$((PASS + 1)); else FAIL=$((FAIL + 1)); fi
+
+              if [[ "$IS_UPGRADE" == "true" ]]; then
+                BASE_APPLY=$(jq -r '.base_deploy.apply_status' "$f")
+                BASE_IDEMP=$(jq -r '.base_deploy.idempotency_status' "$f")
+                UPG_INIT=$(jq -r '.upgrade.init_status' "$f")
+                UPG_PLAN=$(jq -r '.upgrade.plan_status' "$f")
+
+                icon() { [[ "$1" == "success" || "$1" == "pass" ]] && echo "✅" || ([[ "$1" == "skipped" ]] && echo "⏭️" || echo "❌"); }
+                echo "| $EXAMPLE | $(icon "$BASE_APPLY") $BASE_APPLY | $(icon "$BASE_IDEMP") $BASE_IDEMP | $(icon "$UPG_INIT") $UPG_INIT | $(icon "$UPG_PLAN") $UPG_PLAN |" >> "$GITHUB_STEP_SUMMARY"
+              else
+                IDEMP=$(jq -r '.base_deploy.idempotency_status // .idempotency_status' "$f")
+                STATUS_ICON=$([[ "$STATUS" == "success" ]] && echo "✅" || echo "❌")
+                IDEMP_ICON=$([[ "$IDEMP" == "pass" ]] && echo "✅" || ([[ "$IDEMP" == "skipped" ]] && echo "⏭️" || echo "❌"))
+                echo "| $EXAMPLE | $STATUS_ICON $STATUS | $IDEMP_ICON $IDEMP |" >> "$GITHUB_STEP_SUMMARY"
+              fi
             fi
           done
 

@@ -72,6 +72,9 @@ class DeployResult:
     plan_json_path: str = ""
     errors: list[str] = field(default_factory=list)
 
+    # Upgrade test fields (populated when head_ref is set)
+    upgrade: dict | None = None  # UpgradeTestResult from run_upgrade_test
+
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2)
 
