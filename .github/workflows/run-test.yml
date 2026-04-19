@@ -1,0 +1,361 @@
+# Reusable workflow for AVM module testing.
+#
+# This workflow is called from AVM module repos (or manually) to deploy
+# module examples to a test subscription and run analysis.
+#
+# Architecture:
+#   - GHA handles terraform CLI execution (the "runner")
+#   - The testing agent handles analysis (the "analyst")
+#   - Results are uploaded as artifacts for cross-run tracking
+
+name: Module Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      module_source:
+        description: "Module source (registry path, org/repo, or git URL)"
+        required: true
+        type: string
+      base_ref:
+        description: "Base reference (branch, tag, or version to compare from)"
+        required: false
+        default: "main"
+        type: string
+      head_ref:
+        description: "Head reference (branch, tag, or version to compare to)"
+        required: false
+        default: ""
+        type: string
+      examples:
+        description: "Comma-separated list of examples to test (empty = all)"
+        required: false
+        default: ""
+        type: string
+      skip_examples:
+        description: "Comma-separated list of examples to skip"
+        required: false
+        default: ""
+        type: string
+      github_pr:
+        description: "PR number to post results to (0 = no PR)"
+        required: false
+        default: "0"
+        type: string
+      cleanup:
+        description: "Destroy resources after testing"
+        required: false
+        default: "true"
+        type: string
+      max_parallel:
+        description: "Maximum parallel deployments"
+        required: false
+        default: "3"
+        type: string
+
+  workflow_call:
+    inputs:
+      module_source:
+        required: true
+        type: string
+      base_ref:
+        required: false
+        default: "main"
+        type: string
+      head_ref:
+        required: false
+        default: ""
+        type: string
+      examples:
+        required: false
+        default: ""
+        type: string
+      skip_examples:
+        required: false
+        default: ""
+        type: string
+      github_pr:
+        required: false
+        default: "0"
+        type: string
+      cleanup:
+        required: false
+        default: "true"
+        type: string
+      max_parallel:
+        required: false
+        default: "3"
+        type: string
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+  issues: write
+
+env:
+  TF_IN_AUTOMATION: "true"
+  ARM_USE_OIDC: "true"
+
+jobs:
+  # ------------------------------------------------------------------
+  # Discovery: clone the module and identify examples
+  # ------------------------------------------------------------------
+  discover:
+    name: Discover examples
+    runs-on: ubuntu-latest
+    outputs:
+      examples: ${{ steps.discover.outputs.examples }}
+      module_path: ${{ steps.clone.outputs.module_path }}
+    steps:
+      - name: Checkout testing agent
+        uses: actions/checkout@v4
+
+      - name: Clone module under test
+        id: clone
+        run: |
+          MODULE_SOURCE="${{ inputs.module_source }}"
+
+          if [[ "$MODULE_SOURCE" == *"github.com"* ]] || [[ "$MODULE_SOURCE" == */* ]]; then
+            # Git-based source
+            REPO_URL="$MODULE_SOURCE"
+            if [[ ! "$REPO_URL" == https://* ]]; then
+              REPO_URL="https://github.com/${MODULE_SOURCE}.git"
+            fi
+            git clone "$REPO_URL" module-under-test
+            if [[ -n "${{ inputs.head_ref }}" ]]; then
+              cd module-under-test && git checkout "${{ inputs.head_ref }}"
+            elif [[ "${{ inputs.base_ref }}" != "main" ]]; then
+              cd module-under-test && git checkout "${{ inputs.base_ref }}"
+            fi
+          else
+            echo "Registry-based sources not yet supported in GHA workflow"
+            exit 1
+          fi
+
+          echo "module_path=${{ github.workspace }}/module-under-test" >> "$GITHUB_OUTPUT"
+
+      - name: Discover examples
+        id: discover
+        run: |
+          EXAMPLES_DIR="${{ steps.clone.outputs.module_path }}/examples"
+          if [[ ! -d "$EXAMPLES_DIR" ]]; then
+            echo "No examples directory found"
+            echo 'examples=[]' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # List example directories
+          ALL_EXAMPLES=$(ls -d "$EXAMPLES_DIR"/*/ 2>/dev/null | xargs -I{} basename {} | sort)
+
+          # Apply include filter
+          INCLUDE="${{ inputs.examples }}"
+          SKIP="${{ inputs.skip_examples }}"
+
+          if [[ -n "$INCLUDE" ]]; then
+            FILTERED=$(echo "$ALL_EXAMPLES" | grep -wF -f <(echo "$INCLUDE" | tr ',' '\n') || true)
+          elif [[ -n "$SKIP" ]]; then
+            FILTERED=$(echo "$ALL_EXAMPLES" | grep -vwF -f <(echo "$SKIP" | tr ',' '\n') || true)
+          else
+            FILTERED="$ALL_EXAMPLES"
+          fi
+
+          # Convert to JSON array for matrix
+          JSON=$(echo "$FILTERED" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "examples=$JSON" >> "$GITHUB_OUTPUT"
+          echo "Discovered examples: $JSON"
+
+  # ------------------------------------------------------------------
+  # Deploy: run terraform for each example (matrix)
+  # ------------------------------------------------------------------
+  deploy:
+    name: "Deploy: ${{ matrix.example }}"
+    needs: discover
+    if: needs.discover.outputs.examples != '[]'
+    runs-on: ubuntu-latest
+    environment: azure-test-lab
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJson(inputs.max_parallel || '3') }}
+      matrix:
+        example: ${{ fromJson(needs.discover.outputs.examples) }}
+    steps:
+      - name: Checkout testing agent
+        uses: actions/checkout@v4
+
+      - name: Clone module under test
+        run: |
+          MODULE_SOURCE="${{ inputs.module_source }}"
+          if [[ ! "$MODULE_SOURCE" == https://* ]]; then
+            MODULE_SOURCE="https://github.com/${MODULE_SOURCE}.git"
+          fi
+          git clone "$MODULE_SOURCE" module-under-test
+          if [[ -n "${{ inputs.head_ref }}" ]]; then
+            cd module-under-test && git checkout "${{ inputs.head_ref }}"
+          elif [[ "${{ inputs.base_ref }}" != "main" ]]; then
+            cd module-under-test && git checkout "${{ inputs.base_ref }}"
+          fi
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init
+        id: init
+        working-directory: module-under-test/examples/${{ matrix.example }}
+        run: terraform init -upgrade -no-color 2>&1 | tee init.log
+        continue-on-error: true
+
+      - name: Terraform plan
+        id: plan
+        if: steps.init.outcome == 'success'
+        working-directory: module-under-test/examples/${{ matrix.example }}
+        run: |
+          terraform plan -out=tfplan -no-color 2>&1 | tee plan.log
+          terraform show -json tfplan > plan.json 2>/dev/null || true
+        continue-on-error: true
+
+      - name: Terraform apply
+        id: apply
+        if: steps.plan.outcome == 'success'
+        working-directory: module-under-test/examples/${{ matrix.example }}
+        run: terraform apply -auto-approve -no-color tfplan 2>&1 | tee apply.log
+        continue-on-error: true
+
+      - name: Idempotency check
+        id: idempotency
+        if: steps.apply.outcome == 'success'
+        working-directory: module-under-test/examples/${{ matrix.example }}
+        run: |
+          terraform plan -detailed-exitcode -no-color 2>&1 | tee idempotency.log
+          EXITCODE=$?
+          if [[ $EXITCODE -eq 0 ]]; then
+            echo "status=pass" >> "$GITHUB_OUTPUT"
+          elif [[ $EXITCODE -eq 2 ]]; then
+            echo "status=fail" >> "$GITHUB_OUTPUT"
+            terraform show -json tfplan > idempotency-plan.json 2>/dev/null || true
+          else
+            echo "status=error" >> "$GITHUB_OUTPUT"
+          fi
+        continue-on-error: true
+
+      - name: Terraform destroy
+        if: inputs.cleanup == 'true' && steps.apply.outcome == 'success'
+        working-directory: module-under-test/examples/${{ matrix.example }}
+        run: terraform destroy -auto-approve -no-color 2>&1 | tee destroy.log
+        continue-on-error: true
+
+      - name: Build deploy result
+        if: always()
+        run: |
+          mkdir -p results
+          cat > results/${{ matrix.example }}.json <<RESULT
+          {
+            "example": "${{ matrix.example }}",
+            "init_status": "${{ steps.init.outcome }}",
+            "plan_status": "${{ steps.plan.outcome }}",
+            "apply_status": "${{ steps.apply.outcome }}",
+            "idempotency_status": "${{ steps.idempotency.outputs.status || 'skipped' }}",
+            "status": "${{ steps.apply.outcome == 'success' && 'success' || 'failure' }}"
+          }
+          RESULT
+
+      - name: Upload deploy result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-result-${{ matrix.example }}
+          path: results/${{ matrix.example }}.json
+          retention-days: 30
+
+      - name: Upload plan JSON
+        if: steps.plan.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-json-${{ matrix.example }}
+          path: module-under-test/examples/${{ matrix.example }}/plan.json
+          retention-days: 30
+
+  # ------------------------------------------------------------------
+  # Summarise: collect results and generate report
+  # ------------------------------------------------------------------
+  summarise:
+    name: Summarise results
+    needs: [discover, deploy]
+    if: always() && needs.discover.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all deploy results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: deploy-result-*
+          path: results/
+          merge-multiple: true
+
+      - name: Build summary report
+        run: |
+          echo "# Module Test Report" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Module:** \`${{ inputs.module_source }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Base:** ${{ inputs.base_ref }}" >> "$GITHUB_STEP_SUMMARY"
+          if [[ -n "${{ inputs.head_ref }}" ]]; then
+            echo "**Head:** ${{ inputs.head_ref }}" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Example | Deploy | Idempotency |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---------|--------|-------------|" >> "$GITHUB_STEP_SUMMARY"
+
+          PASS=0
+          FAIL=0
+          TOTAL=0
+
+          for f in results/*.json; do
+            if [[ -f "$f" ]]; then
+              EXAMPLE=$(jq -r '.example' "$f")
+              STATUS=$(jq -r '.status' "$f")
+              IDEMP=$(jq -r '.idempotency_status' "$f")
+              STATUS_ICON=$([[ "$STATUS" == "success" ]] && echo "✅" || echo "❌")
+              IDEMP_ICON=$([[ "$IDEMP" == "pass" ]] && echo "✅" || ([[ "$IDEMP" == "skipped" ]] && echo "⏭️" || echo "❌"))
+              echo "| $EXAMPLE | $STATUS_ICON $STATUS | $IDEMP_ICON $IDEMP |" >> "$GITHUB_STEP_SUMMARY"
+              TOTAL=$((TOTAL + 1))
+              if [[ "$STATUS" == "success" ]]; then PASS=$((PASS + 1)); else FAIL=$((FAIL + 1)); fi
+            fi
+          done
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Total:** $TOTAL | **Pass:** $PASS | **Fail:** $FAIL" >> "$GITHUB_STEP_SUMMARY"
+
+          # Merge results into a single JSON for artifact upload
+          jq -s '.' results/*.json > test-report.json
+
+      - name: Upload combined report
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: test-report.json
+          retention-days: 90
+
+      - name: Post PR comment
+        if: inputs.github_pr != '0' && inputs.github_pr != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          COMMENT_BODY=$(cat "$GITHUB_STEP_SUMMARY")
+          gh pr comment "${{ inputs.github_pr }}" \
+            --repo "${{ inputs.module_source }}" \
+            --body "$COMMENT_BODY" || echo "Could not post PR comment"
