@@ -3,11 +3,18 @@
 A hosted agent built with the Microsoft Agent Framework that tests
 Terraform modules by deploying, planning, and analysing diffs.
 Dispatches to local or Foundry-hosted runtime based on configuration.
+
+Invocation modes:
+  Interactive (default):  python main.py
+  Batch (JSON request):  python main.py --request test-request.json
+  Batch (CLI shorthand): python main.py --module Azure/terraform-azurerm-avm-res-... --head-ref feat/azapi
 """
 
 from __future__ import annotations
 
+import argparse
 import logging
+import sys
 
 from dotenv import load_dotenv
 
@@ -112,6 +119,10 @@ Your primary capabilities:
 - Use `ingest_local_module` for local modules, `clone_registry_module` for \
   registry modules, and `clone_repo` for GitHub-hosted modules.
 - Use the `default` example from a module unless the user specifies otherwise.
+- When a TestRequest is provided, test ALL examples unless the request
+  specifies a subset via `examples` or `skip_examples`.
+- In interactive mode without a TestRequest, ask which examples to test
+  or default to all discovered examples.
 - For module upgrades: deploy the old version first with terraform apply, \
   then update the source and run `terraform_plan_json` to capture a \
   structured diff.
@@ -147,6 +158,11 @@ Your primary capabilities:
 - Do not store secrets in workspace files.
 - Confirm destructive operations before proceeding if the user explicitly \
   asked for interactive mode.
+- Before deploying any module, check the module allowlist (policy.py). If \
+  the module is not trusted, ask the user for explicit approval. In \
+  non-interactive (CI) mode, reject untrusted modules.
+- When a TestRequest includes a cost estimate threshold, show the estimate \
+  and ask to proceed before deploying.
 """
 
 ALL_TOOLS = [
@@ -198,12 +214,102 @@ ALL_TOOLS = [
 ]
 
 
+def build_cli_parser() -> argparse.ArgumentParser:
+    """Build the CLI argument parser."""
+    parser = argparse.ArgumentParser(
+        description="Infrastructure Testing Agent — test Terraform modules",
+    )
+    parser.add_argument(
+        "--request",
+        metavar="FILE",
+        help="Path to a test-request.json file (batch mode)",
+    )
+    parser.add_argument(
+        "--module",
+        metavar="SOURCE",
+        help="Module source: registry path, GitHub URL, or local path",
+    )
+    parser.add_argument("--base-ref", default="main", help="Base ref (default: main)")
+    parser.add_argument("--head-ref", default="", help="Head ref for upgrade testing")
+    parser.add_argument(
+        "--examples", default="", help="Comma-separated example names to test"
+    )
+    parser.add_argument(
+        "--skip-examples", default="", help="Comma-separated examples to skip"
+    )
+    parser.add_argument("--github-repo", default="", help="GitHub repo for reporting")
+    parser.add_argument(
+        "--github-pr", type=int, default=0, help="PR number for reporting"
+    )
+    parser.add_argument("--no-cleanup", action="store_true", help="Keep test resources")
+    parser.add_argument("--subscription-id", default="", help="Azure subscription ID")
+    parser.add_argument("--location", default="", help="Azure region")
+    parser.add_argument(
+        "--max-parallel", type=int, default=3, help="Max parallel deploys"
+    )
+    parser.add_argument(
+        "--timeout", type=int, default=120, help="Timeout in minutes"
+    )
+    return parser
+
+
 def main() -> None:
     """Select runtime and start the agent."""
+    parser = build_cli_parser()
+    args = parser.parse_args()
+
     issues = config.validate()
     if issues:
         for issue in issues:
             logger.warning("Config: %s", issue)
+
+    # Build TestRequest from CLI args if provided
+    test_request = None
+    if args.request:
+        from request import TestRequest
+
+        logger.info("Loading test request from %s", args.request)
+        test_request = TestRequest.from_json_file(args.request)
+        logger.info("Test request loaded: run_id=%s", test_request.run_id)
+    elif args.module:
+        from request import TestRequest
+
+        logger.info("Building test request from CLI args")
+        test_request = TestRequest.from_cli_args(
+            module=args.module,
+            base_ref=args.base_ref,
+            head_ref=args.head_ref,
+            examples=args.examples,
+            skip=args.skip_examples,
+            github_repo=args.github_repo,
+            github_pr=args.github_pr,
+            no_cleanup=args.no_cleanup,
+            subscription_id=args.subscription_id,
+            location=args.location,
+            max_parallel=args.max_parallel,
+            timeout=args.timeout,
+        )
+        logger.info("Test request built: run_id=%s", test_request.run_id)
+
+    # Evaluate security policy when a request is provided
+    if test_request is not None:
+        from policy import evaluate_request
+
+        policy_result = evaluate_request(test_request)
+        if not policy_result.approved:
+            logger.error("Policy check failed: %s", policy_result.reason)
+            sys.exit(1)
+        if policy_result.requires_confirmation:
+            logger.warning("Policy: %s", policy_result.reason)
+
+    # Format the initial message for batch mode
+    initial_message = None
+    if test_request is not None:
+        initial_message = test_request.to_agent_message()
+        logger.info(
+            "Batch mode: agent will process TestRequest (run_id=%s)",
+            test_request.run_id,
+        )
 
     if config.multi_agent:
         logger.info("Starting in multi-agent mode")
@@ -212,8 +318,6 @@ def main() -> None:
         pipeline = create_orchestrator(
             mode="foundry" if config.foundry_hosted else "local"
         )
-        # In multi-agent mode, run the orchestrator as the primary agent
-        # Specialists are available via the pipeline dict
         orchestrator = pipeline["orchestrator"]
         specialists = pipeline["specialists"]
         logger.info(
@@ -221,11 +325,9 @@ def main() -> None:
             ", ".join(specialists.keys()),
         )
 
-        # Multi-agent mode always uses the local runtime for the orchestrator.
-        # Foundry A2A agent delegation is Phase 4 work (see ROADMAP.md).
         from runtime.local import run
 
-        run(orchestrator)
+        run(orchestrator, initial_message=initial_message)
 
     elif config.foundry_hosted:
         logger.info("Starting in Foundry-hosted mode (MCP enabled: %s)", config.has_mcp)
@@ -235,10 +337,10 @@ def main() -> None:
         run(client, agent_def)
     else:
         logger.info("Starting in local mode")
-        from runtime.local import create_agent, run
+        from runtime.local import run as local_run, create_agent
 
         agent = create_agent(SYSTEM_INSTRUCTIONS, ALL_TOOLS)
-        run(agent)
+        local_run(agent, initial_message=initial_message)
 
 
 if __name__ == "__main__":
