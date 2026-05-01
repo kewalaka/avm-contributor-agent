@@ -37,6 +37,7 @@ class TestRequest:
     module_source: str = ""
     base_ref: str = "main"
     head_ref: str = ""
+    head_module_source: str = ""
 
     # Scope
     examples: list[str] = field(default_factory=list)
@@ -178,6 +179,9 @@ class TestRequest:
             )
         else:
             lines.append(f"**Ref**: {self.base_ref}")
+
+        if self.head_module_source:
+            lines.append(f"**Head module source**: {self.head_module_source}")
 
         if self.examples:
             lines.append(f"**Examples**: {', '.join(self.examples)}")

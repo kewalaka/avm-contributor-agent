@@ -306,7 +306,7 @@ def get_workflow_run_status(
     result = _gh(cmd)
     if result["exit_code"] == 0:
         try:
-            return result["stdout"]
+            return json.dumps(json.loads(result["stdout"]))
         except json.JSONDecodeError:
             return json.dumps({"status": "error", "details": "Failed to parse run info"})
     return json.dumps({"status": "error", "details": result})
