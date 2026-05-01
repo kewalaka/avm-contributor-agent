@@ -13,13 +13,21 @@ from tools.github_ops import (
     add_issue_comment,
     create_github_issue,
     create_pull_request,
+    download_workflow_artifacts,
     get_latest_release,
+    get_workflow_run_status,
     search_github_issues,
 )
 from tools.reporting import (
     generate_issue_body,
     generate_test_report,
     generate_upgrade_doc_suggestion,
+)
+from tools.tracking import (
+    query_findings,
+    query_module_health,
+    query_test_history,
+    store_test_run,
 )
 
 REPORTER_INSTRUCTIONS = """\
@@ -32,22 +40,31 @@ deploy results. Your job:
 1. **Generate test report**: Call `generate_test_report` with the deploy
    results and confirmed findings. Save the markdown report.
 
-2. **File GitHub issues**: For each confirmed critical/warning finding:
+2. **Store results**: Call `store_test_run` to persist the results in the
+   tracking database for longitudinal analysis.
+
+3. **File GitHub issues**: For each confirmed critical/warning finding:
    a. Call `search_github_issues` to check for existing duplicates.
    b. If no duplicate, call `generate_issue_body` to format the finding.
    c. Call `create_github_issue` to file it.
    d. Track filed issue URLs for the summary.
 
-3. **Propose UPGRADE.md changes**: For missing_doc findings, call
+4. **Propose UPGRADE.md changes**: For missing_doc findings, call
    `generate_upgrade_doc_suggestion` to propose additions.
 
-4. **Post summary**: If there's a tracking issue, call `add_issue_comment`
+5. **Post summary**: If there's a tracking issue, call `add_issue_comment`
    to post the test results summary.
+
+6. **GHA bridge**: If results came from a GitHub Actions workflow, use
+   `download_workflow_artifacts` to retrieve deploy artifacts and
+   `get_workflow_run_status` to check run status.
 
 Output format: Return a JSON object with:
 - report_path: path to the generated test report
+- json_report_path: path to the JSON report
 - issues_filed: list of {url, title, finding_category}
 - upgrade_suggestions: list of suggested UPGRADE.md additions
+- tracking_stored: boolean (whether results were persisted)
 - summary: human-readable summary paragraph
 
 Rules:
@@ -56,6 +73,7 @@ Rules:
 - Use clear, actionable titles for issues.
 - Include reproduction steps in issue bodies.
 - Be concise in PR comments -- link to the full report instead of inlining.
+- ALWAYS store results in the tracking DB for longitudinal analysis.
 """
 
 REPORTER_TOOLS = [
@@ -67,6 +85,12 @@ REPORTER_TOOLS = [
     add_issue_comment,
     search_github_issues,
     get_latest_release,
+    download_workflow_artifacts,
+    get_workflow_run_status,
+    store_test_run,
+    query_module_health,
+    query_test_history,
+    query_findings,
 ]
 
 

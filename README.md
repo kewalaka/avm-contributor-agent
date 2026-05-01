@@ -42,11 +42,18 @@ pip install -r requirements.txt
 cp .env.sample .env
 # Edit .env — set AZURE_AI_PROJECT_ENDPOINT and DEFAULT_SUBSCRIPTION_ID at minimum
 
-# Run locally
+# Run interactively
 python main.py
+
+# Run in batch mode (JSON request file)
+python main.py --request test-request.json
+
+# Run in batch mode (CLI shorthand)
+python main.py --module Azure/terraform-azurerm-avm-res-network-applicationgateway \
+  --base-ref main --head-ref feat/azapi-migration
 ```
 
-The agent listens on `http://localhost:8088` and exposes an OpenAI Responses-compatible API.
+The interactive mode listens on `http://localhost:8088` and exposes an OpenAI Responses-compatible API.
 
 ## Configuration
 
@@ -63,6 +70,60 @@ The agent listens on `http://localhost:8088` and exposes an OpenAI Responses-com
 | `GITHUB_MCP_CONNECTION_ID` | No | — | Foundry connection for GitHub MCP |
 | `AZURE_MCP_CONNECTION_ID` | No | — | Foundry connection for Azure MCP |
 | `EVA_MCP_SERVER_URL` | No | — | EVA/AzAPI MCP server endpoint |
+| `TRUSTED_ORGS` | No | `Azure,kewalaka` | Comma-separated GitHub orgs auto-approved for testing |
+| `TRUSTED_REGISTRY` | No | `Azure/` | Comma-separated registry namespaces auto-approved |
+
+## Invocation Modes
+
+| Mode | Trigger | Use Case |
+|------|---------|----------|
+| **Interactive** | `python main.py` | Developer chat, exploratory testing |
+| **Batch (JSON)** | `python main.py --request file.json` | CI/CD, scheduled runs |
+| **Batch (CLI)** | `python main.py --module ... --head-ref ...` | Quick one-off testing |
+| **Foundry API** | HTTP POST to hosted agent | Programmatic / external systems |
+
+In batch mode, the agent processes the TestRequest and exits. In interactive
+mode, it starts a server and waits for chat messages.
+
+### TestRequest (Input Contract)
+
+Every batch run is driven by a `TestRequest` (see `request.py`):
+
+```json
+{
+  "module_source": "Azure/terraform-azurerm-avm-res-network-applicationgateway",
+  "base_ref": "main",
+  "head_ref": "feat/azapi-migration",
+  "examples": [],
+  "skip_examples": [],
+  "github_repo": "Azure/terraform-azurerm-avm-res-network-applicationgateway",
+  "github_pr": 42,
+  "cleanup": true,
+  "max_parallel": 3,
+  "timeout_minutes": 120
+}
+```
+
+- `examples: []` means test ALL discovered examples (default).
+- `skip_examples` excludes specific examples from the full set.
+
+## Security
+
+The agent deploys real Azure resources with real cost. Several layers
+prevent misuse:
+
+- **Module Allowlist**: Only modules from trusted GitHub orgs or registry
+  namespaces are auto-approved. Unknown sources require human approval in
+  interactive mode, or are rejected in CI mode. Configure via `TRUSTED_ORGS`
+  and `TRUSTED_REGISTRY` env vars.
+- **GHA Environment Protection**: The `azure-test-lab` GitHub Actions
+  environment requires reviewer approval before any `terraform apply`.
+- **Subscription Isolation**: Tests run in a dedicated test subscription
+  with spending limits — never in production.
+- **Auto-Cleanup**: Resources are destroyed after testing by default
+  (`CLEANUP_ON_COMPLETE=true`).
+- **Audit Trail**: Every test run is logged with run_id, module source,
+  and triggering user.
 
 ## Tools
 

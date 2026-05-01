@@ -7,6 +7,7 @@ outputs — test reports, issue bodies, and UPGRADE.md suggestions.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 
 from agent_framework import ai_function
@@ -21,6 +22,7 @@ def generate_test_report(
     module_version: str = "",
     deploy_results_json: str = "[]",
     findings_json: str = "[]",
+    run_id: str = "",
 ) -> str:
     """Generate a structured markdown test report.
 
@@ -113,21 +115,42 @@ def generate_test_report(
 
     report_md = "\n".join(lines)
 
-    # Save report to workspace
+    summary = {
+        "total_deploys": total_deploys,
+        "successes": successes,
+        "failures": failures,
+        "idempotency_failures": idemp_fails,
+        "critical_findings": critical_findings,
+        "total_findings": len(findings),
+    }
+
+    # Save markdown report to workspace
     report_path = _workspace_path(workspace_id) / "test-report.md"
     report_path.write_text(report_md)
+
+    # Save structured JSON report to workspace
+    run_id = run_id or os.environ.get("RUN_ID", "")
+    json_report = {
+        "run_id": run_id,
+        "module_source": module_source,
+        "module_version": module_version,
+        "timestamp": timestamp,
+        "workspace_id": workspace_id,
+        "deploy_results": deploy_results,
+        "findings": findings,
+        "summary": summary,
+    }
+    json_filename = f"test-report-{run_id}.json" if run_id else "test-report.json"
+    json_path = _workspace_path(workspace_id) / json_filename
+    json_path.write_text(json.dumps(json_report, indent=2))
 
     return json.dumps({
         "report": report_md,
         "report_path": "test-report.md",
-        "summary": {
-            "total_deploys": total_deploys,
-            "successes": successes,
-            "failures": failures,
-            "idempotency_failures": idemp_fails,
-            "critical_findings": critical_findings,
-            "total_findings": len(findings),
-        },
+        "json_report_path": json_filename,
+        "summary": summary,
+        "deploy_results": deploy_results,
+        "findings": findings,
     })
 
 

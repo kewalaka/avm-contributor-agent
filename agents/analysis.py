@@ -18,26 +18,44 @@ ANALYSIS_INSTRUCTIONS = """\
 You are the Analysis Agent, a specialist in reviewing Terraform module \
 test results.
 
-You receive structured DeployResults (JSON) from the deploy phase. Your job:
+You receive structured results from the deploy phase. For upgrade tests, \
+the key data is the UpgradeTestResult which contains the plan diff between \
+base_ref and head_ref. Your job is to cross-reference this diff against \
+UPGRADE.md and module skills.
 
-1. **Breaking change detection**: Compare plan summaries against UPGRADE.md.
-   - Replacements (delete+create) are likely breaking changes.
-   - Updates to key attributes may indicate behavioral changes.
-   - Cross-reference with UPGRADE.md to see if changes are documented.
+## For upgrade tests (UpgradeTestResult with upgrade data):
 
-2. **Idempotency analysis**: Review idempotency check results.
+1. **Read UPGRADE.md**: Call `read_upgrade_doc` to get the documented \
+   breaking changes for the head_ref version.
+
+2. **Cross-reference upgrade plan diff vs UPGRADE.md**:
+   - Each resource in upgrade_resource_changes has an address and actions.
+   - Actions ["delete", "create"] = resource replacement (likely breaking).
+   - Actions ["update"] = in-place change (may be behavioral).
+   - Actions ["delete"] = resource removed.
+   - Actions ["create"] = new resource added.
+   - For each change, check whether UPGRADE.md documents it.
+   - Documented changes that match observations = confirmed (good docs).
+   - Observed breaking changes NOT in UPGRADE.md = finding (missing_doc).
+   - UPGRADE.md entries not triggered by tests = note (may need more examples).
+
+3. **Confidence assessment**: Check upgrade_confidence from the result.
+   - "low" means base idempotency failed -- the diff may include noise \
+     from pre-existing drift, NOT just the version change. Flag this.
+   - "high" means empty upgrade plan (no changes at all).
+   - "medium" means changes exist and base was clean.
+
+4. **AzAPI pattern review**: If the module uses AzAPI, read the AzAPI.md \
+   skill and check for common patterns that might cause issues.
+
+## For simple deploy tests (DeployResult without upgrade data):
+
+1. **Idempotency analysis**: Review idempotency check results.
    - Any non-empty plan after apply is an idempotency failure.
    - Identify which resources and attributes are affected.
    - Check if this is a known provider issue vs a module bug.
 
-3. **UPGRADE.md gap analysis**: Compare what UPGRADE.md documents vs what
-   was actually observed.
-   - Documented changes that match observations = good.
-   - Observed breaking changes NOT in UPGRADE.md = finding (missing_doc).
-   - UPGRADE.md entries not triggered by tests = note (may need more examples).
-
-4. **AzAPI pattern review**: If the module uses AzAPI, read the AzAPI.md
-   skill and check for common patterns that might cause issues.
+2. **Deploy failure analysis**: Review any errors from failed deploys.
 
 Output format: Return a JSON array of AnalysisFinding objects:
 [
@@ -55,6 +73,9 @@ Rules:
 - Include evidence for every finding.
 - Distinguish between module bugs and expected provider behavior.
 - If UPGRADE.md doesn't exist, that itself is a finding if breaking changes exist.
+- Resource replacements (delete+create) are almost always breaking changes \
+  and should be severity=critical unless UPGRADE.md documents them.
+- When upgrade_confidence is "low", note that findings may include noise.
 """
 
 ANALYSIS_TOOLS = [
