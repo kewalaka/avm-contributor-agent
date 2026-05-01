@@ -22,6 +22,7 @@ def generate_test_report(
     module_version: str = "",
     deploy_results_json: str = "[]",
     findings_json: str = "[]",
+    run_id: str = "",
 ) -> str:
     """Generate a structured markdown test report.
 
@@ -128,7 +129,7 @@ def generate_test_report(
     report_path.write_text(report_md)
 
     # Save structured JSON report to workspace
-    run_id = os.environ.get("RUN_ID", "")
+    run_id = run_id or os.environ.get("RUN_ID", "")
     json_report = {
         "run_id": run_id,
         "module_source": module_source,
@@ -148,6 +149,8 @@ def generate_test_report(
         "report_path": "test-report.md",
         "json_report_path": json_filename,
         "summary": summary,
+        "deploy_results": deploy_results,
+        "findings": findings,
     })
 
 

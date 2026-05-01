@@ -42,6 +42,11 @@ on:
         required: false
         default: "0"
         type: string
+      github_repo:
+        description: "GitHub repo (owner/repo) to post PR comments to (defaults to module_source)"
+        required: false
+        default: ""
+        type: string
       cleanup:
         description: "Destroy resources after testing"
         required: false
@@ -77,6 +82,10 @@ on:
       github_pr:
         required: false
         default: "0"
+        type: string
+      github_repo:
+        required: false
+        default: ""
         type: string
       cleanup:
         required: false
@@ -123,8 +132,8 @@ jobs:
         run: |
           MODULE_SOURCE="${{ inputs.module_source }}"
 
-          if [[ "$MODULE_SOURCE" == *"github.com"* ]] || [[ "$MODULE_SOURCE" == */* ]]; then
-            # Git-based source
+          if [[ "$MODULE_SOURCE" == *"github.com"* ]] || [[ "$MODULE_SOURCE" =~ ^[^/]+/[^/]+$ ]]; then
+            # Git-based source (GitHub URL or org/repo shorthand)
             REPO_URL="$MODULE_SOURCE"
             if [[ ! "$REPO_URL" == https://* ]]; then
               REPO_URL="https://github.com/${MODULE_SOURCE}.git"
@@ -196,8 +205,17 @@ jobs:
       - name: Clone module under test
         run: |
           MODULE_SOURCE="${{ inputs.module_source }}"
-          if [[ ! "$MODULE_SOURCE" == https://* ]]; then
-            MODULE_SOURCE="https://github.com/${MODULE_SOURCE}.git"
+          if [[ "$MODULE_SOURCE" == *"github.com"* ]] || [[ "$MODULE_SOURCE" =~ ^[^/]+/[^/]+$ ]]; then
+            # Git-based source (GitHub URL or org/repo shorthand)
+            if [[ ! "$MODULE_SOURCE" == https://* ]]; then
+              MODULE_SOURCE="https://github.com/${MODULE_SOURCE}.git"
+            fi
+          elif [[ "$MODULE_SOURCE" =~ ^[^/]+/[^/]+/[^/]+$ ]]; then
+            echo "Registry-based sources are not yet supported in GHA workflow"
+            exit 1
+          else
+            echo "Unsupported module_source format: $MODULE_SOURCE"
+            exit 1
           fi
           # Deep clone needed to switch between refs for upgrade testing
           git clone --depth 100 "$MODULE_SOURCE" module-under-test
@@ -440,6 +458,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           COMMENT_BODY=$(cat "$GITHUB_STEP_SUMMARY")
+          COMMENT_REPO="${{ inputs.github_repo || inputs.module_source }}"
           gh pr comment "${{ inputs.github_pr }}" \
-            --repo "${{ inputs.module_source }}" \
+            --repo "$COMMENT_REPO" \
             --body "$COMMENT_BODY" || echo "Could not post PR comment"

@@ -68,8 +68,8 @@ def git_switch_ref(
                 "tag_fetch_result": tag_fetch,
             })
 
-    # Clean working tree before switching (remove untracked TF artifacts)
-    _git(["clean", "-fd"], ws_path)
+    # Clean working tree before switching (preserve external state files)
+    _git(["clean", "-fd", "--exclude=*.tfstate", "--exclude=*.tfstate.backup"], ws_path)
     _git(["checkout", "--", "."], ws_path)
 
     # Checkout detached to the fetched ref
@@ -180,3 +180,62 @@ def clone_registry_module(
 
     result["warning"] = f"Could not checkout version {version}, staying on default branch"
     return json.dumps(result)
+
+
+@ai_function
+def add_remote(
+    workspace_id: str,
+    remote_url: str,
+    remote_name: str = "upstream",
+    target_dir: str = "module",
+    fetch_depth: int = 50,
+) -> str:
+    """Add a second remote to an already-cloned repository and fetch it.
+
+    Useful for cross-repo upgrade testing where the base and head versions
+    live in different repositories.  After adding the remote, branches/tags
+    from it are available for ``git_switch_ref``.
+
+    Args:
+        workspace_id: Workspace id from create_workspace.
+        remote_url: HTTPS URL of the remote to add.
+        remote_name: Name for the new remote (default "upstream").
+        target_dir: Directory within the workspace containing the clone.
+        fetch_depth: How many commits to fetch (default 50, use 0 for full).
+
+    Returns:
+        JSON with the result of add + fetch.
+    """
+    if not remote_url.startswith("https://"):
+        return json.dumps({"error": "Only HTTPS remote URLs are accepted"})
+
+    ws_path = _workspace_path(workspace_id) / target_dir
+    if not (ws_path / ".git").exists():
+        return json.dumps({"error": f"No git repo found at {target_dir}"})
+
+    # Remove existing remote with same name if present (ignore errors)
+    _git(["remote", "remove", remote_name], ws_path)
+
+    add_result = _git(["remote", "add", remote_name, remote_url], ws_path)
+    if add_result["exit_code"] != 0:
+        return json.dumps({
+            "error": f"Failed to add remote: {add_result['stderr']}",
+            "result": add_result,
+        })
+
+    fetch_cmd = ["fetch", remote_name]
+    if fetch_depth > 0:
+        fetch_cmd.extend(["--depth", str(fetch_depth)])
+    fetch_result = _git(fetch_cmd, ws_path)
+    if fetch_result["exit_code"] != 0:
+        return json.dumps({
+            "error": f"Added remote but fetch failed: {fetch_result['stderr']}",
+            "remote_name": remote_name,
+            "fetch_result": fetch_result,
+        })
+
+    return json.dumps({
+        "status": "ready",
+        "remote_name": remote_name,
+        "remote_url": remote_url,
+    })

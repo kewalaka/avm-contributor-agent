@@ -55,6 +55,7 @@ from tools.azure import (
     get_current_identity,
 )
 from tools.git_ops import (
+    add_remote,
     clone_registry_module,
     clone_repo,
     git_switch_ref,
@@ -224,6 +225,8 @@ ALL_TOOLS = [
     # Git
     clone_repo,
     clone_registry_module,
+    git_switch_ref,
+    add_remote,
     # Module Discovery
     ingest_local_module,
     discover_module_structure,
@@ -238,10 +241,19 @@ ALL_TOOLS = [
     add_issue_comment,
     search_github_issues,
     get_latest_release,
+    download_workflow_artifacts,
+    get_workflow_run_status,
     # Reporting
     generate_test_report,
     generate_issue_body,
     generate_upgrade_doc_suggestion,
+    # Tracking
+    store_test_run,
+    query_findings,
+    query_module_health,
+    query_test_history,
+    # Upgrade Test
+    run_upgrade_test,
 ]
 
 
@@ -331,6 +343,12 @@ def main() -> None:
             logger.error("Policy check failed: %s", policy_result.reason)
             sys.exit(1)
         if policy_result.requires_confirmation:
+            if not test_request.interactive:
+                logger.error(
+                    "Policy requires confirmation but running in non-interactive (batch) mode: %s",
+                    policy_result.reason,
+                )
+                sys.exit(1)
             logger.warning("Policy: %s", policy_result.reason)
 
     # Format the initial message for batch mode
