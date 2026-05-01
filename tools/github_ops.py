@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import subprocess
 
-from agent_framework import ai_function
+from agent_framework import tool as ai_function
 
 
 def _gh(args: list[str], timeout: int = 60) -> dict:

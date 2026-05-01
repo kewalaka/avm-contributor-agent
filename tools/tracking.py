@@ -16,7 +16,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
-from agent_framework import ai_function
+from agent_framework import tool as ai_function
 
 # Default DB path -- override via TRACKING_DB_PATH env var
 _DEFAULT_DB = "tracking.db"

@@ -6,7 +6,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from agent_framework import ai_function
+from agent_framework import tool as ai_function
 
 from tools.terraform import _workspace_path
 

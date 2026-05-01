@@ -14,7 +14,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from agent_framework import ai_function
+from agent_framework import tool as ai_function
 
 from config import config
 
