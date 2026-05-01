@@ -13,7 +13,7 @@ import re
 import shutil
 from pathlib import Path
 
-from agent_framework import tool as ai_function
+from agent_framework import tool
 
 from models import ModuleMap
 from tools.terraform import _workspace_path
@@ -96,7 +96,7 @@ def _detect_devcontainer_image(module_root: Path) -> str | None:
         return None
 
 
-@ai_function
+@tool
 def ingest_local_module(
     workspace_id: str,
     local_path: str,
@@ -143,7 +143,7 @@ def ingest_local_module(
     })
 
 
-@ai_function
+@tool
 def discover_module_structure(
     workspace_id: str,
     module_dir: str = "module",
@@ -188,7 +188,7 @@ def discover_module_structure(
     return module_map.to_json()
 
 
-@ai_function
+@tool
 def read_module_skill(
     workspace_id: str,
     skill_path: str,
@@ -233,7 +233,7 @@ def read_module_skill(
         return json.dumps({"error": str(e)})
 
 
-@ai_function
+@tool
 def list_module_examples(
     workspace_id: str,
     module_dir: str = "module",

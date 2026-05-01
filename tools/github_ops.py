@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import subprocess
 
-from agent_framework import tool as ai_function
+from agent_framework import tool
 
 
 def _gh(args: list[str], timeout: int = 60) -> dict:
@@ -27,7 +27,7 @@ def _gh(args: list[str], timeout: int = 60) -> dict:
         return {"exit_code": -1, "stdout": "", "stderr": "gh CLI not found — install from https://cli.github.com/"}
 
 
-@ai_function
+@tool
 def create_github_issue(
     repo: str,
     title: str,
@@ -55,7 +55,7 @@ def create_github_issue(
     return json.dumps({"status": "error", "details": result})
 
 
-@ai_function
+@tool
 def create_pull_request(
     repo: str,
     branch: str,
@@ -94,7 +94,7 @@ def create_pull_request(
     return json.dumps({"status": "error", "details": result})
 
 
-@ai_function
+@tool
 def add_issue_comment(
     repo: str,
     issue_number: int,
@@ -124,7 +124,7 @@ def add_issue_comment(
     return json.dumps({"status": "error", "details": result})
 
 
-@ai_function
+@tool
 def search_github_issues(
     repo: str,
     query: str,
@@ -159,7 +159,7 @@ def search_github_issues(
     return json.dumps({"status": "error", "details": result})
 
 
-@ai_function
+@tool
 def get_latest_release(
     repo: str,
 ) -> str:
@@ -188,7 +188,7 @@ def get_latest_release(
     return json.dumps({"status": "error", "details": result})
 
 
-@ai_function
+@tool
 def download_workflow_artifacts(
     repo: str,
     run_id: str = "",
@@ -271,7 +271,7 @@ def download_workflow_artifacts(
     })
 
 
-@ai_function
+@tool
 def get_workflow_run_status(
     repo: str,
     run_id: str = "",

@@ -16,7 +16,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
-from agent_framework import tool as ai_function
+from agent_framework import tool
 
 # Default DB path -- override via TRACKING_DB_PATH env var
 _DEFAULT_DB = "tracking.db"
@@ -97,7 +97,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     """)
 
 
-@ai_function
+@tool
 def store_test_run(
     run_id: str,
     module_source: str,
@@ -229,7 +229,7 @@ def store_test_run(
         conn.close()
 
 
-@ai_function
+@tool
 def query_module_health(
     module_source: str = "",
     limit: int = 20,
@@ -265,7 +265,7 @@ def query_module_health(
         conn.close()
 
 
-@ai_function
+@tool
 def query_test_history(
     module_source: str = "",
     limit: int = 10,
@@ -307,7 +307,7 @@ def query_test_history(
         conn.close()
 
 
-@ai_function
+@tool
 def query_findings(
     module_source: str = "",
     severity: str = "",

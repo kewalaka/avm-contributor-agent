@@ -10,12 +10,12 @@ import json
 import os
 from datetime import datetime, timezone
 
-from agent_framework import tool as ai_function
+from agent_framework import tool
 
 from tools.terraform import _workspace_path
 
 
-@ai_function
+@tool
 def generate_test_report(
     workspace_id: str,
     module_source: str,
@@ -154,7 +154,7 @@ def generate_test_report(
     })
 
 
-@ai_function
+@tool
 def generate_issue_body(
     finding_category: str,
     finding_description: str,
@@ -230,7 +230,7 @@ def generate_issue_body(
     })
 
 
-@ai_function
+@tool
 def generate_upgrade_doc_suggestion(
     observed_changes_json: str,
     existing_upgrade_md: str = "",

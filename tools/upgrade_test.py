@@ -29,7 +29,7 @@ import os
 import time
 from pathlib import Path
 
-from agent_framework import tool as ai_function
+from agent_framework import tool
 
 from tools.terraform import _workspace_path
 
@@ -133,7 +133,7 @@ def _parse_plan_json(show_result: dict) -> tuple[dict, list[dict]]:
     return summary, resource_changes
 
 
-@ai_function
+@tool
 def run_upgrade_test(
     workspace_id: str,
     module_dir: str,

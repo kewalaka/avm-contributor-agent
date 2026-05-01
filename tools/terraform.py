@@ -1,6 +1,6 @@
 """Terraform CLI tools for the Infrastructure Testing Agent.
 
-Each public function is decorated with @ai_function so the Microsoft Agent
+Each public function is decorated with @tool so the Microsoft Agent
 Framework exposes it as a callable tool to the LLM.
 """
 
@@ -14,7 +14,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from agent_framework import tool as ai_function
+from agent_framework import tool
 
 from config import config
 
@@ -61,7 +61,7 @@ def _workspace_path(workspace_id: str) -> Path:
 # ---------------------------------------------------------------------------
 
 
-@ai_function
+@tool
 def create_workspace(name: str = "") -> str:
     """Create a fresh isolated workspace directory and return its id.
 
@@ -80,7 +80,7 @@ def create_workspace(name: str = "") -> str:
     return json.dumps({"workspace_id": ws_id, "path": str(ws_path)})
 
 
-@ai_function
+@tool
 def delete_workspace(workspace_id: str) -> str:
     """Delete a workspace directory and all its contents.
 
@@ -97,7 +97,7 @@ def delete_workspace(workspace_id: str) -> str:
     return json.dumps({"status": "not_found", "workspace_id": workspace_id})
 
 
-@ai_function
+@tool
 def terraform_init(
     workspace_id: str,
     working_dir: str = ".",
@@ -130,7 +130,7 @@ def terraform_init(
     return json.dumps(_run(cmd, ws_path))
 
 
-@ai_function
+@tool
 def terraform_plan(
     workspace_id: str,
     working_dir: str = ".",
@@ -155,7 +155,7 @@ def terraform_plan(
     return json.dumps(_run(cmd, ws_path))
 
 
-@ai_function
+@tool
 def terraform_apply(
     workspace_id: str,
     working_dir: str = ".",
@@ -186,7 +186,7 @@ def terraform_apply(
     return json.dumps(_run(cmd, ws_path, timeout=1200))
 
 
-@ai_function
+@tool
 def terraform_destroy(
     workspace_id: str,
     working_dir: str = ".",
@@ -209,7 +209,7 @@ def terraform_destroy(
     return json.dumps(_run(cmd, ws_path, timeout=1200))
 
 
-@ai_function
+@tool
 def terraform_show(
     workspace_id: str,
     working_dir: str = ".",
@@ -232,7 +232,7 @@ def terraform_show(
     return json.dumps(_run(cmd, ws_path))
 
 
-@ai_function
+@tool
 def terraform_output(
     workspace_id: str,
     working_dir: str = ".",
@@ -251,7 +251,7 @@ def terraform_output(
     return json.dumps(_run(cmd, ws_path))
 
 
-@ai_function
+@tool
 def terraform_test(
     workspace_id: str,
     working_dir: str = ".",
@@ -270,7 +270,7 @@ def terraform_test(
     return json.dumps(_run(cmd, ws_path, timeout=1800))
 
 
-@ai_function
+@tool
 def terraform_init_upgrade(
     workspace_id: str,
     working_dir: str = ".",
@@ -304,7 +304,7 @@ def terraform_init_upgrade(
     return json.dumps(_run(cmd, ws_path))
 
 
-@ai_function
+@tool
 def run_avm_cli(
     workspace_id: str,
     command: str,
@@ -344,7 +344,7 @@ def run_avm_cli(
     return json.dumps(_run(cmd, ws_path, timeout=1800))
 
 
-@ai_function
+@tool
 def terraform_plan_json(
     workspace_id: str,
     working_dir: str = ".",
@@ -425,7 +425,7 @@ def terraform_plan_json(
     }, indent=2)
 
 
-@ai_function
+@tool
 def check_idempotency(
     workspace_id: str,
     working_dir: str = ".",
@@ -506,7 +506,7 @@ def check_idempotency(
         })
 
 
-@ai_function
+@tool
 def list_workspace_files(
     workspace_id: str,
     relative_path: str = ".",
@@ -533,7 +533,7 @@ def list_workspace_files(
     return json.dumps(entries)
 
 
-@ai_function
+@tool
 def read_workspace_file(
     workspace_id: str,
     file_path: str,
@@ -566,7 +566,7 @@ def read_workspace_file(
         return json.dumps({"error": str(e)})
 
 
-@ai_function
+@tool
 def write_workspace_file(
     workspace_id: str,
     file_path: str,

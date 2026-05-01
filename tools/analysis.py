@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 
-from agent_framework import tool as ai_function
+from agent_framework import tool
 
 from tools.terraform import _workspace_path
 
 
-@ai_function
+@tool
 def read_upgrade_doc(
     workspace_id: str,
     file_path: str = "UPGRADE.md",
@@ -39,7 +39,7 @@ def read_upgrade_doc(
         return json.dumps({"error": str(e)})
 
 
-@ai_function
+@tool
 def summarise_plan_json(
     workspace_id: str,
     plan_file: str = "tfplan",

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 
-from agent_framework import tool as ai_function
+from agent_framework import tool
 
 from config import config
 
@@ -22,7 +22,7 @@ def _az(args: list[str], timeout: int = 120) -> dict:
         return {"exit_code": -1, "stdout": "", "stderr": f"az command timed out after {timeout}s"}
 
 
-@ai_function
+@tool
 def create_resource_group(
     name: str,
     location: str = "",
@@ -50,7 +50,7 @@ def create_resource_group(
     return json.dumps(_az(cmd))
 
 
-@ai_function
+@tool
 def delete_resource_group(name: str) -> str:
     """Delete an Azure resource group (async, no wait).
 
@@ -64,7 +64,7 @@ def delete_resource_group(name: str) -> str:
     return json.dumps(_az(cmd))
 
 
-@ai_function
+@tool
 def check_resource_group_exists(name: str) -> str:
     """Check whether an Azure resource group exists.
 
@@ -80,7 +80,7 @@ def check_resource_group_exists(name: str) -> str:
     return json.dumps({"exists": exists, "name": name})
 
 
-@ai_function
+@tool
 def get_current_identity() -> str:
     """Return the identity the agent is currently authenticated as.
 
@@ -94,7 +94,7 @@ def get_current_identity() -> str:
     return json.dumps(result)
 
 
-@ai_function
+@tool
 def check_role_assignments(
     scope: str,
     assignee: str = "",

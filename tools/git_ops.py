@@ -6,7 +6,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from agent_framework import tool as ai_function
+from agent_framework import tool
 
 from tools.terraform import _workspace_path
 
@@ -23,7 +23,7 @@ def _git(args: list[str], cwd: str | Path, timeout: int = 120) -> dict:
         return {"exit_code": -1, "stdout": "", "stderr": f"git command timed out after {timeout}s"}
 
 
-@ai_function
+@tool
 def git_switch_ref(
     workspace_id: str,
     ref: str,
@@ -100,7 +100,7 @@ def git_switch_ref(
     })
 
 
-@ai_function
+@tool
 def clone_repo(
     workspace_id: str,
     repo_url: str,
@@ -136,7 +136,7 @@ def clone_repo(
     return json.dumps(result)
 
 
-@ai_function
+@tool
 def clone_registry_module(
     workspace_id: str,
     module_source: str,
@@ -182,7 +182,7 @@ def clone_registry_module(
     return json.dumps(result)
 
 
-@ai_function
+@tool
 def add_remote(
     workspace_id: str,
     remote_url: str,
