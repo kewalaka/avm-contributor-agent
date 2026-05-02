@@ -42,32 +42,60 @@ logger = logging.getLogger(__name__)
 
 _MAX_ATTEMPTS = 3
 
-DEVELOPER_INSTRUCTIONS = """\
+_DEVELOPER_INSTRUCTIONS_FALLBACK = """\
 You are the Developer agent in the tf-module-developer-agent pipeline.
 Your job is to implement a GitHub issue fix on an AVM Terraform module fork.
-
-You have access to tools for:
-- Reading module structure and examples
-- Writing and committing file changes
-- Reading the upstream issue and codebase
-- Looking up AVM conventions
-
-When given a task:
-1. Read the upstream issue to understand what needs to change
-2. Explore the module structure (main.tf, variables.tf, outputs.tf, examples/)
-3. Implement the minimum change that resolves the issue
-4. Commit with a clear conventional commit message
-5. Report the diff summary so the Reviewer can evaluate it
-
-Always follow AVM conventions:
-- snake_case variable names
-- Outputs: id + resource (at minimum)
-- No hardcoded locations — use var.location
-- No provider version pins unless explicitly needed
-- Required AVM metadata preserved
-
+Follow AVM Terraform conventions: snake_case names, required outputs (id, resource),
+no hardcoded locations, azapi preferred for new resources.
 Do NOT push — the orchestrator handles pushing after Reviewer approval.
 """
+
+
+def _load_prompt_file(filename: str) -> str:
+    """Load a prompt/skill file from the agents/ directory tree."""
+    agents_dir = Path(__file__).parent
+    path = agents_dir / filename
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        logger.warning("Prompt file not found: %s", path)
+        return ""
+
+
+def _load_module_skill_content(workspace_path: str) -> str | None:
+    """Scan the module workspace for an AVM skill file and return its content."""
+    ws = Path(workspace_path)
+    candidates = [
+        ws / ".agents" / "skills" / "AVM-Terraform-Development" / "SKILL.md",
+        ws / ".agents" / "skills" / "AVM-Terraform-Development.md",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            logger.info("Found module skill: %s", candidate)
+            return candidate.read_text(encoding="utf-8")
+    # Fallback: any .md in the skill directory
+    skill_dir = ws / ".agents" / "skills" / "AVM-Terraform-Development"
+    if skill_dir.is_dir():
+        for md_file in sorted(skill_dir.glob("*.md")):
+            logger.info("Found module skill (fallback): %s", md_file)
+            return md_file.read_text(encoding="utf-8")
+    logger.warning("No module skill found in %s — using additive instructions only", workspace_path)
+    return None
+
+
+def _build_developer_instructions(workspace_path: str) -> str:
+    """Build developer instructions from module skill (if present) + additive overlay."""
+    module_skill = _load_module_skill_content(workspace_path)
+    additive = _load_prompt_file("prompts/developer-additive.md")
+
+    if module_skill and additive:
+        return f"{module_skill}\n\n---\n\n{additive}"
+    if module_skill:
+        return module_skill
+    if additive:
+        return f"{_DEVELOPER_INSTRUCTIONS_FALLBACK}\n\n---\n\n{additive}"
+    return _DEVELOPER_INSTRUCTIONS_FALLBACK
+
 
 DEVELOPER_TOOLS = [
     create_branch,
@@ -289,6 +317,9 @@ async def run_developer_pipeline(request: DevRequest) -> dict:
     if request.issue_number is not None:
         issue_context = _get_issue_context(request.upstream_repo, request.issue_number)
 
+    # Build developer instructions once (module skill + additive overlay)
+    developer_instructions = _build_developer_instructions(workspace_path)
+
     # Step 3 — Developer → Reviewer → Push loop (max _MAX_ATTEMPTS)
     attempts: list[FixAttempt] = []
     pr_url: str = ""
@@ -300,7 +331,7 @@ async def run_developer_pipeline(request: DevRequest) -> dict:
         attempt = FixAttempt(attempt_number=attempt_number, branch_name=branch_name)
 
         # a. Developer turn
-        developer = create_specialist("developer", DEVELOPER_INSTRUCTIONS, DEVELOPER_TOOLS)
+        developer = create_specialist("developer", developer_instructions, DEVELOPER_TOOLS)
         dev_message = _build_developer_message(
             request, workspace_path, attempt_number, previous_feedback
         )

@@ -3,39 +3,44 @@
 from __future__ import annotations
 
 import json
+import logging
+from pathlib import Path
 
 from agents.base import create_specialist
 from models import DiffReview
 
+logger = logging.getLogger(__name__)
 
-REVIEWER_INSTRUCTIONS = """\
+_REVIEWER_INSTRUCTIONS_FALLBACK = """\
 You are the Reviewer agent in the tf-module-developer-agent pipeline.
-Your job is to evaluate code diffs BEFORE they are pushed to a fork branch.
-
-You evaluate three dimensions:
-1. INTENT: Does the diff match the stated task? No extra changes unrelated to the issue.
-2. SCOPE: Is the diff clean? No auto-generated files, no whitespace-only changes in unrelated files,
-   no lock file mutations unless explicitly required.
-3. AVM CONVENTIONS: Does the diff follow Azure Verified Modules conventions?
-   - Variables use snake_case
-   - Outputs match AVM interface spec (id, resource)
-   - No hardcoded locations (use var.location)
-   - Required AVM metadata (module_version, etc.) present if touched
-   - No provider version pins added unless necessary
-
-Respond with a JSON object matching this schema:
-{
-  "verdict": "approved" | "rejected" | "needs_changes",
-  "intent_matches": true/false,
-  "scope_clean": true/false,
-  "conventions_ok": true/false,
-  "issues": ["specific problem 1", ...],
-  "suggestions": ["optional improvement 1", ...],
-  "reviewer_notes": "brief summary"
-}
-
-Be concise. Only flag genuine problems. Do not reject diffs for stylistic preferences.
+Evaluate diffs for intent, scope, and AVM conventions before push.
+Respond with a JSON object: verdict, intent_matches, scope_clean,
+conventions_ok, issues, suggestions, reviewer_notes.
 """
+
+
+def _build_reviewer_instructions() -> str:
+    """Load the forked AVM review skill + reviewer additive overlay."""
+    agents_dir = Path(__file__).parent
+
+    skill_path = agents_dir / "skills" / "avm-review-skill.md"
+    additive_path = agents_dir / "prompts" / "reviewer-additive.md"
+
+    parts = []
+    for path in (skill_path, additive_path):
+        try:
+            parts.append(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            logger.warning("Reviewer prompt file not found: %s", path)
+
+    if parts:
+        return "\n\n---\n\n".join(parts)
+    logger.warning("No reviewer skill files found — using fallback instructions")
+    return _REVIEWER_INSTRUCTIONS_FALLBACK
+
+
+# Build once at module load (reviewer instructions are static)
+_REVIEWER_INSTRUCTIONS = _build_reviewer_instructions()
 
 
 async def review_diff(
@@ -52,7 +57,7 @@ async def review_diff(
             reviewer_notes="Empty diff — nothing to review",
         )
 
-    agent = create_specialist("reviewer", REVIEWER_INSTRUCTIONS, [])
+    agent = create_specialist("reviewer", _REVIEWER_INSTRUCTIONS, [])
 
     message = (
         f"Task: {task_description}\n\n"
