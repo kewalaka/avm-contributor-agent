@@ -64,13 +64,12 @@ Authors **MUST** only use the following Azure providers:
 - **SHOULD** use pessimistic version constraint operator (`~>`)
 
 > **Microsoft AVM Direction (Amendment):**
-> Microsoft has mandated `azapi` as the required provider for AVM modules. `azurerm` is NOT acceptable for new resource blocks.
+> Microsoft has mandated `azapi` as the required provider for AVM modules. `azurerm` is NOT acceptable for new resource blocks except in the narrow cases below.
 >
-> - New resource blocks **MUST** use `azapi_resource` or `azapi_update_resource`.
-> - **Exception:** AVM utility interface resources (diagnostics, telemetry — e.g., `azurerm_monitor_diagnostic_setting`, `azurerm_management_lock`) remain `azurerm_*` until the `avm-res-app-interfaces` / `avm-util-interfaces` module is available. These interfaces ship from the `avm-utilities` pattern and are NOT under the module author's control.
-> - `azuread` remains acceptable for Entra ID / identity resources.
-> - `azurerm_user_assigned_identity` is acceptable for managed identity resources.
-> - **Do NOT** introduce any new `azurerm_*` resource blocks for the module's primary resource type or supporting resources outside the exceptions above.
+> - New resource blocks **MUST** use `azapi_resource` or `azapi_update_resource`, including managed identity resources (use `azapi_resource` for `Microsoft.ManagedIdentity/userAssignedIdentities`).
+> - **AVM utility interfaces** (`terraform-azure-avm-utl-interfaces`) **MAY** be used for all interface aspects **except diagnostics**. The diagnostics interface is pending the `feat/prepv1` branch of `terraform-azure-avm-utl-interfaces` (requires special list-handling capability not yet released). Until that branch merges, diagnostics must be implemented directly as `azurerm_monitor_diagnostic_setting`.
+> - `azuread_*` resources (Entra ID — groups, applications, service principals) remain acceptable as there is no `azapi` equivalent.
+> - **Do NOT** introduce any new `azurerm_*` resource blocks outside the diagnostics and `azuread_*` exceptions above.
 
 **Example (preferred for new modules):**
 

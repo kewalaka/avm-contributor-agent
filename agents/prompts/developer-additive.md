@@ -43,7 +43,8 @@ For **new resource blocks** in this module:
 - Prefer `azapi_resource` / `azapi_update_resource` when the resource type is supported by the azapi provider.
 - Do NOT duplicate the same resource management across both `azapi` and `azurerm` in the same module.
 - Check the existing `terraform.tf` or `providers.tf` to understand which providers are already declared.
-- For identity and AAD resources, `azurerm` / `azuread` remain acceptable.
+- For Entra ID resources (`azuread_*`), `azuread` is acceptable — there is no `azapi` equivalent. Managed identity resources (`Microsoft.ManagedIdentity/userAssignedIdentities`) **must** use `azapi_resource`, not `azurerm_user_assigned_identity`.
+- For diagnostics (`azurerm_monitor_diagnostic_setting`), `azurerm` is acceptable until the `feat/prepv1` branch of `terraform-azure-avm-utl-interfaces` merges. All other AVM utility interfaces can be used now.
 
 ## Scope Boundaries
 
