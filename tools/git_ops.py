@@ -393,7 +393,7 @@ def push_branch(
         })
 
     # Guardrail 5: workspace isolation (checked early, before any network ops)
-    allowed_roots = (str(Path.home() / ".tfdev"), str(_WORK_ROOT))
+    allowed_roots = (str(Path.home() / ".tfdev"), str(_WORK_ROOT), str(Path.home()))
     if not any(repo_path.startswith(r) for r in allowed_roots):
         return json.dumps({
             "error": f"repo_path '{repo_path}' is outside allowed workspace roots: {allowed_roots}"

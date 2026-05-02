@@ -222,9 +222,10 @@ class TestRequest:
 class DevRequest:
     """Structured input for a module development run.
 
-    Supports two operating modes:
-      - issue-driven: upstream_repo + issue_number → fork + branch + PR
-      - existing-repo: local_path → CI dispatch + fix loop
+    Supports three operating modes:
+      - issue-driven:  upstream_repo + issue_number → fork + branch + PR
+      - existing-repo: local_path → CI dispatch + fix loop (skips fork/clone)
+      - existing-pr:   pr_number → clone fork branch + continue from current state
     """
 
     # Required
@@ -243,6 +244,9 @@ class DevRequest:
     # Existing-repo mode
     local_path: str = ""
 
+    # Existing-PR mode
+    pr_number: int | None = None
+
     # PR settings
     base_ref: str = "main"
 
@@ -256,7 +260,11 @@ class DevRequest:
 
     @property
     def mode(self) -> str:
-        return "existing-repo" if self.local_path else "issue-driven"
+        if self.local_path:
+            return "existing-repo"
+        if self.pr_number is not None:
+            return "existing-pr"
+        return "issue-driven"
 
     # --- Validation ---
 
@@ -274,7 +282,12 @@ class DevRequest:
                 )
 
         if self.mode == "issue-driven" and self.issue_number is None:
-            errors.append("issue_number is required for issue-driven mode")
+            errors.append(
+                "a starting point is required: provide --issue, --existing-repo, or --pr"
+            )
+
+        if self.mode == "existing-repo" and not Path(self.local_path).exists():
+            errors.append(f"local_path does not exist: {self.local_path}")
 
         if errors:
             raise ValueError(
@@ -293,6 +306,12 @@ class DevRequest:
                 if clean
                 else f"issue-{self.issue_number}-{short_id}"
             )
+        elif self.mode == "existing-pr":
+            suffix = (
+                f"manual-pr-{self.pr_number}-{clean}-{short_id}"
+                if clean
+                else f"manual-pr-{self.pr_number}-{short_id}"
+            )
         else:
             suffix = f"manual-{clean}-{short_id}" if clean else f"manual-{short_id}"
         return f"agent/{suffix}"
@@ -305,6 +324,10 @@ class DevRequest:
         ]
         if self.issue_number is not None:
             lines.append(f"Issue: #{self.issue_number}")
+        if self.pr_number is not None:
+            lines.append(f"PR: #{self.pr_number}")
+        if self.local_path:
+            lines.append(f"Local path: {self.local_path}")
         if self.fork_owner:
             lines.append(f"Fork owner: {self.fork_owner}")
         branch = self.branch_name or self.auto_branch_name()
