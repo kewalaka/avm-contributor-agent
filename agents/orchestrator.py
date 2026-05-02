@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 from dataclasses import asdict
 from pathlib import Path
@@ -116,7 +117,6 @@ def _get_current_branch(workspace_path: str) -> str:
 
 def _get_fork_owner_from_remote(workspace_path: str) -> str:
     """Parse the owner login from the 'origin' remote URL in workspace_path."""
-    import re as _re
     try:
         result = subprocess.run(
             ["git", "remote", "get-url", "origin"],
@@ -125,10 +125,10 @@ def _get_fork_owner_from_remote(workspace_path: str) -> str:
         )
         if result.returncode == 0:
             url = result.stdout.strip()
-            m = _re.match(r"https?://github\.com/([^/]+)/", url)
+            m = re.match(r"https?://github\.com/([^/]+)/", url)
             if m:
                 return m.group(1)
-            m = _re.match(r"git@github\.com:([^/]+)/", url)
+            m = re.match(r"git@github\.com:([^/]+)/", url)
             if m:
                 return m.group(1)
     except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -362,7 +362,7 @@ async def run_developer_pipeline(request: DevRequest) -> dict:
             }
 
         head_ref_name: str = pr_details.get("headRefName", "")
-        head_repo: dict = pr_details.get("headRepository", {}) or {}
+        head_repo: dict = pr_details.get("headRepository", {})
         pr_fork_repo: str = head_repo.get("nameWithOwner", "")
         pr_fork_owner: str = (head_repo.get("owner") or {}).get("login", "")
 

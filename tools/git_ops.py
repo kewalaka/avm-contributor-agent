@@ -393,6 +393,11 @@ def push_branch(
         })
 
     # Guardrail 5: workspace isolation (checked early, before any network ops)
+    # ~/.tfdev and _WORK_ROOT cover automated (issue-driven) workspaces.
+    # Path.home() additionally covers existing-repo mode where the user explicitly
+    # provides a local checkout path anywhere under their home directory.
+    # The remote ownership check (guardrail 2) remains the primary protection
+    # against pushing to wrong repositories.
     allowed_roots = (str(Path.home() / ".tfdev"), str(_WORK_ROOT), str(Path.home()))
     if not any(repo_path.startswith(r) for r in allowed_roots):
         return json.dumps({
