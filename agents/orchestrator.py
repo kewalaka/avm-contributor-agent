@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 from dataclasses import asdict
 from pathlib import Path
@@ -41,6 +42,9 @@ from tools.analysis import read_upgrade_doc, summarise_plan_json
 logger = logging.getLogger(__name__)
 
 _MAX_ATTEMPTS = 3
+
+# Agent branch name pattern — must match the guardrail in tools/git_ops.py
+_BRANCH_RE = re.compile(r"^agent/(issue-\d+|manual)-[a-z0-9-]+$")
 
 _DEVELOPER_INSTRUCTIONS_FALLBACK = """\
 You are the Developer agent in the tf-module-developer-agent pipeline.
@@ -134,6 +138,128 @@ def _load_module_skill_content(workspace_path: str) -> str | None:
         workspace_path,
     )
     return None
+
+
+def _get_pr_details(repo: str, pr_number: int) -> dict | None:
+    """Fetch PR details: headRefName and headRepository (nameWithOwner, owner login).
+
+    Args:
+        repo: Repository to look up the PR in (owner/repo format).
+              For fork PRs pass the fork repo; for upstream PRs pass the upstream repo.
+        pr_number: PR number within that repo.
+    """
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "view", str(pr_number), "--repo", repo,
+             "--json", "headRefName,headRepository"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0:
+            return json.loads(result.stdout)
+    except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
+        pass
+    return None
+
+
+def _clone_local_repo_to_workspace(local_path: str, run_id: str, repo_name: str) -> dict:
+    """Clone a local git repository into the isolated workspace directory.
+
+    Uses ``git clone --local`` (hardlinks) so the clone is fast and the user's
+    working tree is untouched.  The origin remote is then repointed to the fork's
+    GitHub URL (inferred from the local repo's upstream remote or origin).
+
+    Note: only *committed* changes are visible in the clone.  Any uncommitted or
+    unstaged work must be committed in the source repository first.
+
+    Returns a dict with ``status`` ('cloned' or 'error') and ``clone_path``.
+    """
+    import os
+
+    src = Path(local_path).resolve()
+    ws_dir = Path.home() / ".tfdev" / "ws" / run_id
+    clone_path = ws_dir / repo_name
+    ws_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        result = subprocess.run(
+            ["git", "clone", "--local", str(src), str(clone_path)],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            return {"status": "error", "details": result.stderr}
+    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        return {"status": "error", "details": str(exc)}
+
+    # Repoint origin to the fork's GitHub URL (try 'origin' first, then 'upstream')
+    for remote_name in ("origin", "upstream"):
+        try:
+            r = subprocess.run(
+                ["git", "remote", "get-url", remote_name],
+                capture_output=True, text=True, timeout=15,
+                cwd=str(src),
+            )
+            if r.returncode == 0:
+                github_url = r.stdout.strip()
+                # Only accept actual GitHub URLs; skip local file paths.
+                # Validate with urllib.parse to avoid substring-match bypasses.
+                try:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(github_url)
+                    is_github_https = (
+                        parsed.scheme == "https"
+                        and parsed.netloc == "github.com"
+                    )
+                except Exception:
+                    is_github_https = False
+                is_github_ssh = re.match(r"^git@github\.com:[^/]+/.+\.git$", github_url) is not None
+                if is_github_https or is_github_ssh:
+                    subprocess.run(
+                        ["git", "remote", "set-url", "origin", github_url],
+                        cwd=str(clone_path), capture_output=True, text=True, timeout=15,
+                    )
+                    break
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            continue
+
+    return {"status": "cloned", "clone_path": str(clone_path)}
+
+
+def _get_current_branch(workspace_path: str) -> str:
+    """Return the current git branch name in workspace_path; empty string on error."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=15,
+            cwd=workspace_path,
+        )
+        if result.returncode == 0:
+            branch = result.stdout.strip()
+            return branch if branch != "HEAD" else ""
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return ""
+
+
+def _get_fork_owner_from_remote(workspace_path: str) -> str:
+    """Parse the owner login from the 'origin' remote URL in workspace_path."""
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, text=True, timeout=15,
+            cwd=workspace_path,
+        )
+        if result.returncode == 0:
+            url = result.stdout.strip()
+            m = re.match(r"https?://github\.com/([^/]+)/", url)
+            if m:
+                return m.group(1)
+            m = re.match(r"git@github\.com:([^/]+)/", url)
+            if m:
+                return m.group(1)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return ""
+
 
 
 def _build_developer_instructions(workspace_path: str) -> str:
@@ -282,6 +408,10 @@ def _build_developer_message(
             "",
             "Address ALL of the above before committing.",
         ]
+    elif request.mode in ("existing-repo", "existing-pr"):
+        lines.append(
+            "Review the existing changes in this workspace and continue from the current state."
+        )
     else:
         lines.append("Please implement the fix for this issue and commit your changes.")
     return "\n".join(lines)
@@ -325,45 +455,124 @@ async def run_developer_pipeline(request: DevRequest) -> dict:
     except ValueError as exc:
         return {"outcome": "error", "errors": [str(exc)]}
 
-    # Step 1 — Prepare fork + workspace
     repo_name = request.upstream_repo.split("/")[-1]
     fork_owner = request.fork_owner or ""
 
-    fork_result = json.loads(ensure_fork(request.upstream_repo, fork_owner))
-    if fork_result.get("status") == "error":
-        return {"outcome": "error", "errors": [f"ensure_fork failed: {fork_result}"]}
+    # Step 1 — Prepare workspace (mode-dependent)
+    if request.mode == "existing-repo":
+        # Clone the user's local checkout into the isolated workspace (~/.tfdev/ws/).
+        # Only committed changes are visible in the clone; uncommitted work must be
+        # committed locally first.
+        src_path = str(Path(request.local_path).resolve())
+        if not fork_owner:
+            fork_owner = _get_fork_owner_from_remote(src_path)
+        fork_repo = f"{fork_owner}/{repo_name}" if fork_owner else repo_name
 
-    fork_owner = fork_result.get("fork_owner") or fork_owner
-    fork_repo = fork_result.get("fork_repo") or f"{fork_owner}/{repo_name}"
+        clone_result = _clone_local_repo_to_workspace(src_path, request.run_id, repo_name)
+        if clone_result.get("status") != "cloned":
+            return {"outcome": "error", "errors": [f"local clone failed: {clone_result}"]}
+        workspace_path = clone_result["clone_path"]
 
-    sync_result = json.loads(
-        sync_fork_default_branch(fork_repo, request.upstream_repo, request.base_ref)
-    )
-    if sync_result.get("status") == "error":
-        if sync_result.get("reason") == "fork_diverged":
+        branch_name = _get_current_branch(workspace_path)
+        if not branch_name or not _BRANCH_RE.match(branch_name):
+            # Current branch doesn't match agent convention - create one
+            branch_name = request.auto_branch_name()
+            branch_result = json.loads(create_branch(workspace_path, branch_name, request.base_ref))
+            if branch_result.get("status") != "created":
+                return {"outcome": "error", "errors": [f"create_branch failed: {branch_result}"]}
+
+        logger.info("existing-repo mode: workspace=%s branch=%s", workspace_path, branch_name)
+
+    elif request.mode == "existing-pr":
+        # Determine which repo hosts the PR.
+        # With --fork-owner: look in the fork (fork PRs / draft PRs within the fork).
+        # Without --fork-owner: look in upstream (upstream-targeted PRs from a fork).
+        pr_lookup_repo = (
+            f"{fork_owner}/{repo_name}" if fork_owner else request.upstream_repo
+        )
+        pr_details = _get_pr_details(pr_lookup_repo, request.pr_number)
+        if not pr_details:
             return {
-                "outcome": "escalated",
-                "escalation_reason": "fork diverged from upstream — manual intervention required",
+                "outcome": "error",
+                "errors": [
+                    f"Could not fetch PR #{request.pr_number} from {pr_lookup_repo}"
+                ],
             }
-        return {"outcome": "error", "errors": [f"sync_fork_default_branch failed: {sync_result}"]}
 
-    clone_result = json.loads(clone_fork(fork_repo, request.run_id, request.base_ref))
-    if clone_result.get("status") != "cloned":
-        return {"outcome": "error", "errors": [f"clone_fork failed: {clone_result}"]}
+        head_ref_name: str = pr_details.get("headRefName", "")
+        head_repo: dict = pr_details.get("headRepository", {})
+        pr_fork_repo: str = head_repo.get("nameWithOwner", "")
+        pr_fork_owner: str = (head_repo.get("owner") or {}).get("login", "")
 
-    workspace_path = clone_result["clone_path"]
+        if not head_ref_name or not pr_fork_repo:
+            return {
+                "outcome": "error",
+                "errors": [
+                    f"Incomplete PR details for #{request.pr_number}: "
+                    f"headRefName={head_ref_name!r}, headRepository={pr_fork_repo!r}"
+                ],
+            }
 
-    # Step 2 — Create branch
-    issue_title = ""
-    if request.issue_number is not None:
-        issue_title = _get_issue_title(request.upstream_repo, request.issue_number)
+        if not fork_owner:
+            fork_owner = pr_fork_owner or pr_fork_repo.split("/")[0]
+        fork_repo = pr_fork_repo
 
-    slug = issue_title.lower().replace(" ", "-")[:40] if issue_title else ""
-    branch_name = request.auto_branch_name(slug)
+        # Clone the fork at the PR head branch
+        clone_result = json.loads(clone_fork(fork_repo, request.run_id, head_ref_name))
+        if clone_result.get("status") != "cloned":
+            return {"outcome": "error", "errors": [f"clone_fork (existing-pr) failed: {clone_result}"]}
 
-    branch_result = json.loads(create_branch(workspace_path, branch_name, request.base_ref))
-    if branch_result.get("status") != "created":
-        return {"outcome": "error", "errors": [f"create_branch failed: {branch_result}"]}
+        workspace_path = clone_result["clone_path"]
+
+        # Create an agent-compliant branch from the PR head so push_branch guardrails pass.
+        # The existing PR is kept as the tracked PR so CI evidence and flip-ready target it.
+        branch_name = request.auto_branch_name()
+        branch_result = json.loads(create_branch(workspace_path, branch_name, head_ref_name))
+        if branch_result.get("status") != "created":
+            return {"outcome": "error", "errors": [f"create_branch (existing-pr) failed: {branch_result}"]}
+
+        logger.info(
+            "existing-pr mode: workspace=%s new branch=%s (from PR head %s)",
+            workspace_path, branch_name, head_ref_name,
+        )
+
+    else:
+        # issue-driven — original fork/clone behaviour
+        fork_result = json.loads(ensure_fork(request.upstream_repo, fork_owner))
+        if fork_result.get("status") == "error":
+            return {"outcome": "error", "errors": [f"ensure_fork failed: {fork_result}"]}
+
+        fork_owner = fork_result.get("fork_owner") or fork_owner
+        fork_repo = fork_result.get("fork_repo") or f"{fork_owner}/{repo_name}"
+
+        sync_result = json.loads(
+            sync_fork_default_branch(fork_repo, request.upstream_repo, request.base_ref)
+        )
+        if sync_result.get("status") == "error":
+            if sync_result.get("reason") == "fork_diverged":
+                return {
+                    "outcome": "escalated",
+                    "escalation_reason": "fork diverged from upstream — manual intervention required",
+                }
+            return {"outcome": "error", "errors": [f"sync_fork_default_branch failed: {sync_result}"]}
+
+        clone_result = json.loads(clone_fork(fork_repo, request.run_id, request.base_ref))
+        if clone_result.get("status") != "cloned":
+            return {"outcome": "error", "errors": [f"clone_fork failed: {clone_result}"]}
+
+        workspace_path = clone_result["clone_path"]
+
+        # Step 2 — Create branch
+        issue_title = ""
+        if request.issue_number is not None:
+            issue_title = _get_issue_title(request.upstream_repo, request.issue_number)
+
+        slug = issue_title.lower().replace(" ", "-")[:40] if issue_title else ""
+        branch_name = request.auto_branch_name(slug)
+
+        branch_result = json.loads(create_branch(workspace_path, branch_name, request.base_ref))
+        if branch_result.get("status") != "created":
+            return {"outcome": "error", "errors": [f"create_branch failed: {branch_result}"]}
 
     # Fetch issue context once for the reviewer
     issue_context = ""
@@ -373,10 +582,15 @@ async def run_developer_pipeline(request: DevRequest) -> dict:
     # Build developer instructions once (module skill + additive overlay)
     developer_instructions = _build_developer_instructions(workspace_path)
 
-    # Step 3 — Developer → Reviewer → Push loop (max _MAX_ATTEMPTS)
-    attempts: list[FixAttempt] = []
+    # For existing-pr mode, prime pr_url / pr_number from the known PR
     pr_url: str = ""
     pr_number: int | None = None
+    if request.mode == "existing-pr" and request.pr_number is not None:
+        pr_url = f"https://github.com/{request.upstream_repo}/pull/{request.pr_number}"
+        pr_number = request.pr_number
+
+    # Step 3 — Developer → Reviewer → Push loop (max _MAX_ATTEMPTS)
+    attempts: list[FixAttempt] = []
     previous_feedback: list[str] = []
 
     for attempt_number in range(1, _MAX_ATTEMPTS + 1):
@@ -439,8 +653,11 @@ async def run_developer_pipeline(request: DevRequest) -> dict:
                 previous_feedback = [f"Push failed: {err} — resolve workspace state and retry"]
                 continue
 
-            # Open draft PR on first successful push
+            # Open draft PR on first successful push (skip if PR already exists)
             if not pr_url:
+                issue_title = ""
+                if request.issue_number is not None:
+                    issue_title = _get_issue_title(request.upstream_repo, request.issue_number)
                 pr_title = (
                     f"fix: {issue_title}"
                     if issue_title

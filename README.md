@@ -127,7 +127,7 @@ python main.py <subcommand> [options]
 
 | Subcommand | Description |
 |------------|-------------|
-| `dev` | **Issue-driven development** — fork, implement, review, dispatch CI, open PR |
+| `dev` | **Developer pipeline** — fork, implement, review, dispatch CI, open PR |
 | `chat` | Interactive chat mode (single agent, local or Foundry-hosted) |
 | `test` | Legacy batch test-request mode |
 
@@ -135,10 +135,25 @@ python main.py <subcommand> [options]
 
 ```
 --upstream-repo   OWNER/REPO   Upstream AVM module repository (required)
---issue           N            Issue number to work on (required)
---fork-owner      OWNER        GitHub org/user that owns your fork (required)
---existing-repo   PATH         Use a local checkout instead of cloning (stub — see issue #12)
+--fork-owner      OWNER        GitHub org/user that owns your fork
+--base-ref        REF          Base branch (default: main)
+
+Starting-point (exactly one required):
+  --issue     N     Issue number on the upstream repo  →  issue-driven mode
+  --pr        N     PR number (on fork if --fork-owner provided, else upstream)  →  existing-pr mode
+  --existing-repo PATH  Local git checkout  →  existing-repo mode
 ```
+
+#### Mode behaviour
+
+| Mode | Trigger | What the agent does |
+|------|---------|---------------------|
+| `issue-driven` | `--issue N` | Forks upstream, clones, creates branch, implements from scratch |
+| `existing-pr` | `--pr N` | Fetches PR head branch, clones it, creates agent branch, continues from current state |
+| `existing-repo` | `--existing-repo PATH` | Clones local checkout to `~/.tfdev/ws/`, continues from current state |
+
+> **Note for `existing-repo`**: Changes must be committed locally; uncommitted work
+> is not visible to the agent in the isolated workspace clone.
 
 ---
 
@@ -164,9 +179,8 @@ to feed back into the Developer/Reviewer loop.
   Never `main`, `master`, or `develop`. Force-push is disabled.
 - **Auth separation**: `gh auth login` (developer's own identity) handles upstream/fork ops.
   `AGENT_DISPATCH_TOKEN` (scoped PAT) handles CI dispatch only.
-- **Workspace isolation**: all clones live under `~/.tfdev/ws/<run_id>/`.
-- **Provenance tracking**: first agent commit SHA is recorded; subsequent pushes
-  are rejected if any intervening commit lacks an `Agent-Run-Id` trailer.
+- **Workspace isolation**: all agent-managed clones live under `~/.tfdev/ws/<run_id>/`
+  (both automated and local-clone modes). The user's source checkout is never modified.
 
 ---
 
