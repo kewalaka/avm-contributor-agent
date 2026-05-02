@@ -209,6 +209,13 @@ def build_cli_parser() -> argparse.ArgumentParser:
         help="Local path for existing-repo mode (skips fork/clone)",
     )
     dev_p.add_argument(
+        "--pr",
+        type=int,
+        default=None,
+        metavar="NUMBER",
+        help="PR number in the upstream repo (existing-pr mode: clones fork branch and continues)",
+    )
+    dev_p.add_argument(
         "--resume",
         default="",
         metavar="RUN_ID",
@@ -277,6 +284,7 @@ def run_dev(args: argparse.Namespace) -> None:
         fork_owner=args.fork_owner,
         base_ref=args.base_ref,
         local_path=args.existing_repo,
+        pr_number=args.pr,
         max_ci_retries=args.max_retries,
     )
 

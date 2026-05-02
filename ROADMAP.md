@@ -65,13 +65,16 @@ Drive the full pipeline against a real upstream issue.
 - [ ] Verify PR body managed sections regenerate correctly on re-push
 - [ ] Verify Reviewer stop condition triggers correctly on persistent failures
 
-## Phase 6 — Existing-Repo / PR Mode (issue #12)
+## Phase 6 — Existing-Repo / PR Mode ✅
 
 Start from a local fork branch or open PR rather than a GitHub issue.
 
-- [ ] `--existing-repo <path>` CLI flag wired in `orchestrator.py` (currently modelled but ignored)
-- [ ] Skip fork-creation and upstream-PR-open when in existing-repo mode
-- [ ] Tutorial: `aca-managed-environment-dev.ipynb` demonstrates this path
+- [x] `--pr N` CLI flag — `existing-pr` mode: fetches PR head branch metadata, clones fork branch, creates agent-compliant branch, continues from current state
+- [x] `--existing-repo PATH` CLI flag — `existing-repo` mode: clones local checkout to `~/.tfdev/ws/`, uses agent-compliant branch, skips fork-creation
+- [x] `DevRequest.validate()` enforces exactly one starting-point input (`--issue` xor `--existing-repo` xor `--pr`)
+- [x] Developer opening instruction changes to "Review existing changes, continue from current state" in both modes
+- [x] PR lookup uses fork repo when `--fork-owner` is provided (supports fork-internal draft PRs as in the ACA tutorial)
+- [x] Tutorial `aca-managed-environment-dev.ipynb` updated with Workflow B (Existing-PR) using `--pr 1 --fork-owner kewalaka`
 
 ## Deferred — Phase 7: Daemon Mode
 
