@@ -11,6 +11,7 @@ examples to include, and WHERE to report results.  It can be created from:
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -215,3 +216,98 @@ class TestRequest:
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2)
+
+
+@dataclass
+class DevRequest:
+    """Structured input for a module development run.
+
+    Supports two operating modes:
+      - issue-driven: upstream_repo + issue_number → fork + branch + PR
+      - existing-repo: local_path → CI dispatch + fix loop
+    """
+
+    # Required
+    upstream_repo: str
+
+    # Issue-driven mode
+    issue_number: int | None = None
+
+    # Fork / branch
+    fork_owner: str = ""
+    branch_name: str = ""
+
+    # Unique run identifier
+    run_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+
+    # Existing-repo mode
+    local_path: str = ""
+
+    # PR settings
+    base_ref: str = "main"
+
+    # Execution control
+    max_ci_retries: int = 3
+
+    # CI dispatch (one per CI run, populated from dev request context)
+    test_request: TestRequest = field(default_factory=TestRequest)
+
+    # --- Properties ---
+
+    @property
+    def mode(self) -> str:
+        return "existing-repo" if self.local_path else "issue-driven"
+
+    # --- Validation ---
+
+    def validate(self) -> None:
+        """Raise ValueError if the request is invalid."""
+        errors: list[str] = []
+
+        if not self.upstream_repo:
+            errors.append("upstream_repo is required")
+        else:
+            parts = self.upstream_repo.split("/")
+            if len(parts) != 2 or not parts[0] or not parts[1]:
+                errors.append(
+                    "upstream_repo must be in owner/repo format with both parts non-empty"
+                )
+
+        if self.mode == "issue-driven" and self.issue_number is None:
+            errors.append("issue_number is required for issue-driven mode")
+
+        if errors:
+            raise ValueError(
+                "Invalid DevRequest:\n" + "\n".join(f"  - {e}" for e in errors)
+            )
+
+    # --- Helpers ---
+
+    def auto_branch_name(self, slug: str = "") -> str:
+        """Generate the canonical branch name for this run."""
+        clean = re.sub(r"[^a-z0-9\-]", "", slug.lower()[:40].replace(" ", "-"))
+        short_id = self.run_id[:6]
+        if self.mode == "issue-driven":
+            suffix = (
+                f"issue-{self.issue_number}-{clean}-{short_id}"
+                if clean
+                else f"issue-{self.issue_number}-{short_id}"
+            )
+        else:
+            suffix = f"manual-{clean}-{short_id}" if clean else f"manual-{short_id}"
+        return f"agent/{suffix}"
+
+    def to_agent_message(self) -> str:
+        """Format this request as a structured message for the Developer agent."""
+        lines = [
+            f"Mode: {self.mode}",
+            f"Upstream: {self.upstream_repo}",
+        ]
+        if self.issue_number is not None:
+            lines.append(f"Issue: #{self.issue_number}")
+        if self.fork_owner:
+            lines.append(f"Fork owner: {self.fork_owner}")
+        branch = self.branch_name or self.auto_branch_name()
+        lines.append(f"Branch: {branch}")
+        lines.append(f"Run ID: {self.run_id}")
+        return "\n".join(lines)
