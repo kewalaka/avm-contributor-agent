@@ -212,18 +212,18 @@ def dispatch_module_checks(
     artifacts_dir = str(Path.home() / ".tfdev" / "ws" / run_id / "ci" / "checks")
 
     dispatch_result = _post_repository_dispatch(
-        "module-check",
+        "module-checks",
         {
             "dispatch_id": dispatch_id,
-            "module_repo": module_repo,
-            "module_ref": module_ref,
+            "source": module_repo,
+            "branch": module_ref,
         },
     )
     if dispatch_result["status"] != "dispatched":
         return json.dumps({"status": "error", "dispatch_id": dispatch_id, **dispatch_result})
 
     gha_run_id = _find_triggered_run(
-        "module-checks.yml", dispatch_result["timestamp"], timeout_s=120
+        "checks.yml", dispatch_result["timestamp"], timeout_s=120
     )
     if not gha_run_id:
         return json.dumps({
@@ -275,16 +275,15 @@ def dispatch_module_e2e(
         "module-e2e",
         {
             "dispatch_id": dispatch_id,
-            "module_repo": module_repo,
-            "module_ref": module_ref,
-            "example": example,
+            "source": module_repo,
+            "branch": module_ref,
         },
     )
     if dispatch_result["status"] != "dispatched":
         return json.dumps({"status": "error", "dispatch_id": dispatch_id, **dispatch_result})
 
     gha_run_id = _find_triggered_run(
-        "module-e2e.yml", dispatch_result["timestamp"], timeout_s=120
+        "e2e-tests.yml", dispatch_result["timestamp"], timeout_s=120
     )
     if not gha_run_id:
         return json.dumps({
