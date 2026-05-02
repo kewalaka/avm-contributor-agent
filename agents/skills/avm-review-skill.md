@@ -64,12 +64,13 @@ Authors **MUST** only use the following Azure providers:
 - **SHOULD** use pessimistic version constraint operator (`~>`)
 
 > **Microsoft AVM Direction (Amendment):**
-> New AVM modules **SHOULD** default to `azapi` as the primary provider. The `azapi` provider maps directly to Azure Resource Manager APIs and is Microsoft's strategic choice for AVM going forward.
+> Microsoft has mandated `azapi` as the required provider for AVM modules. `azurerm` is NOT acceptable for new resource blocks.
 >
-> - New resource blocks **SHOULD** use `azapi_resource` or `azapi_update_resource` rather than `azurerm_*` equivalents when the azapi provider supports the resource type.
-> - `azurerm` is fully acceptable for **existing modules** and for resource types not yet covered by `azapi` (e.g., AzureAD resources via `azuread`, or resources that require azurerm-specific helper logic).
-> - Do **NOT** introduce new `azurerm_*` resource blocks in a module that already manages the same resource type via `azapi`.
-> - For authentication and identity resources (`azuread`, managed identities via `azurerm_user_assigned_identity`), `azurerm` remains acceptable.
+> - New resource blocks **MUST** use `azapi_resource` or `azapi_update_resource`.
+> - **Exception:** AVM utility interface resources (diagnostics, telemetry — e.g., `azurerm_monitor_diagnostic_setting`, `azurerm_management_lock`) remain `azurerm_*` until the `avm-res-app-interfaces` / `avm-util-interfaces` module is available. These interfaces ship from the `avm-utilities` pattern and are NOT under the module author's control.
+> - `azuread` remains acceptable for Entra ID / identity resources.
+> - `azurerm_user_assigned_identity` is acceptable for managed identity resources.
+> - **Do NOT** introduce any new `azurerm_*` resource blocks for the module's primary resource type or supporting resources outside the exceptions above.
 
 **Example (preferred for new modules):**
 

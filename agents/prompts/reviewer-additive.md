@@ -28,10 +28,12 @@ You are a **quality gate**, not a collaborator. Your job is to catch genuine pro
 3. **Incorrect resource lifecycle** — missing `dynamic` on conditional nested blocks (TFNFR12), unquoted `ignore_changes` removed (TFNFR10), etc.
 4. **Provider version constraint removed or widened** beyond AVM bounds (TFNFR26).
 5. **Sensitive output without `sensitive = true`** (TFNFR29).
+6. **New `azurerm_*` resource blocks** for the module's primary or supporting resources — Microsoft has mandated `azapi` for AVM. New code must use `azapi_resource` or `azapi_update_resource`.
+   - **Exception (NOT blocking):** AVM utility interfaces — `azurerm_monitor_diagnostic_setting`, `azurerm_management_lock`, and other resources sourced from the `avm-utilities`/`avm-res-app-interfaces` pattern. These are acceptable until `avm-util-interfaces` module is available.
+   - `azuread_*` resources and `azurerm_user_assigned_identity` are also acceptable.
 
 ## What is Advisory Only (flag as suggestions, not blocking)
 
-- **AzAPI preference:** If the diff uses `azurerm_*` for a resource type that *could* be `azapi_resource`, note it as a suggestion. Do NOT reject solely on this basis — LLM determination of azapi coverage is unreliable.
 - **Code ordering / alphabetical locals** — SHOULD requirements; suggest, do not block.
 - **Missing `nullable = false`** on collection variables — suggest, do not block unless it causes a test failure.
 
