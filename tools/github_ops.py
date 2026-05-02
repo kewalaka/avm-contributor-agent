@@ -8,6 +8,7 @@ the GitHub MCP server is not available (Foundry-hosted mode uses MCP).
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 
 from agent_framework import ai_function
@@ -309,4 +310,92 @@ def get_workflow_run_status(
             return json.dumps(json.loads(result["stdout"]))
         except json.JSONDecodeError:
             return json.dumps({"status": "error", "details": "Failed to parse run info"})
+    return json.dumps({"status": "error", "details": result})
+
+
+@ai_function
+def update_pr_body_section(
+    repo: str,
+    pr_number: int,
+    section_name: str,
+    content: str,
+) -> str:
+    """Update a named managed region in a PR body.
+
+    Managed regions use HTML comment markers so the agent can update CI
+    evidence without overwriting human-authored content elsewhere in the body.
+
+    Marker format::
+
+        <!-- agent:<section_name> -->
+        ... content ...
+        <!-- /agent:<section_name> -->
+
+    If the section already exists it is replaced in-place; otherwise it is
+    appended to the end of the body.
+
+    Args:
+        repo: Repository in owner/repo format.
+        pr_number: Pull request number.
+        section_name: Region name (e.g. 'summary', 'evidence', 'upgrade').
+        content: New content to place inside the managed region.
+
+    Returns:
+        JSON with update status or error details.
+    """
+    # Fetch current PR body
+    view_result = _gh(["pr", "view", "--repo", repo, str(pr_number), "--json", "body", "--jq", ".body"])
+    if view_result["exit_code"] != 0:
+        return json.dumps({"status": "error", "details": view_result})
+
+    try:
+        body = json.loads(view_result["stdout"])
+    except (json.JSONDecodeError, ValueError):
+        # gh --jq returns a bare string without JSON quotes in some versions
+        body = view_result["stdout"].rstrip("\n")
+
+    new_region = f"<!-- agent:{section_name} -->\n{content}\n<!-- /agent:{section_name} -->"
+    pattern = rf"<!-- agent:{re.escape(section_name)} -->.*?<!-- /agent:{re.escape(section_name)} -->"
+
+    if re.search(pattern, body, flags=re.DOTALL):
+        new_body = re.sub(pattern, new_region, body, flags=re.DOTALL)
+    else:
+        new_body = body + "\n\n" + new_region
+
+    edit_result = subprocess.run(
+        ["gh", "pr", "edit", "--repo", repo, str(pr_number), "--body", new_body],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if edit_result.returncode != 0:
+        return json.dumps({
+            "status": "error",
+            "details": {"exit_code": edit_result.returncode, "stderr": edit_result.stderr},
+        })
+
+    return json.dumps({"status": "updated", "section": section_name, "pr_number": pr_number})
+
+
+@ai_function
+def flip_pr_ready(
+    repo: str,
+    pr_number: int,
+) -> str:
+    """Mark a draft PR as ready for review.
+
+    Only call this when CI is green and the changes are ready for human review.
+
+    Args:
+        repo: Repository in owner/repo format.
+        pr_number: Pull request number.
+
+    Returns:
+        JSON with the resulting status or error details.
+    """
+    result = _gh(["pr", "ready", "--repo", repo, str(pr_number)])
+    if result["exit_code"] == 0:
+        return json.dumps({"status": "ready", "pr_number": pr_number})
+    if "already in ready state" in result["stderr"].lower() or "already ready" in result["stderr"].lower():
+        return json.dumps({"status": "already_ready", "pr_number": pr_number})
     return json.dumps({"status": "error", "details": result})
