@@ -43,6 +43,9 @@ logger = logging.getLogger(__name__)
 
 _MAX_ATTEMPTS = 3
 
+# Agent branch name pattern — must match the guardrail in tools/git_ops.py
+_BRANCH_RE = re.compile(r"^agent/(issue-\d+|manual)-[a-z0-9-]+$")
+
 _DEVELOPER_INSTRUCTIONS_FALLBACK = """\
 You are the Developer agent in the tf-module-developer-agent pipeline.
 Your job is to implement a GitHub issue fix on an AVM Terraform module fork.
@@ -84,11 +87,17 @@ def _load_module_skill_content(workspace_path: str) -> str | None:
     return None
 
 
-def _get_pr_details(upstream_repo: str, pr_number: int) -> dict | None:
-    """Fetch PR details: headRefName and headRepository (nameWithOwner, owner login)."""
+def _get_pr_details(repo: str, pr_number: int) -> dict | None:
+    """Fetch PR details: headRefName and headRepository (nameWithOwner, owner login).
+
+    Args:
+        repo: Repository to look up the PR in (owner/repo format).
+              For fork PRs pass the fork repo; for upstream PRs pass the upstream repo.
+        pr_number: PR number within that repo.
+    """
     try:
         result = subprocess.run(
-            ["gh", "pr", "view", str(pr_number), "--repo", upstream_repo,
+            ["gh", "pr", "view", str(pr_number), "--repo", repo,
              "--json", "headRefName,headRepository"],
             capture_output=True, text=True, timeout=30,
         )
@@ -97,6 +106,58 @@ def _get_pr_details(upstream_repo: str, pr_number: int) -> dict | None:
     except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
         pass
     return None
+
+
+def _clone_local_repo_to_workspace(local_path: str, run_id: str, repo_name: str) -> dict:
+    """Clone a local git repository into the isolated workspace directory.
+
+    Uses ``git clone --local`` (hardlinks) so the clone is fast and the user's
+    working tree is untouched.  The origin remote is then repointed to the fork's
+    GitHub URL (inferred from the local repo's upstream remote or origin).
+
+    Note: only *committed* changes are visible in the clone.  Any uncommitted or
+    unstaged work must be committed in the source repository first.
+
+    Returns a dict with ``status`` ('cloned' or 'error') and ``clone_path``.
+    """
+    import os
+
+    src = Path(local_path).resolve()
+    ws_dir = Path.home() / ".tfdev" / "ws" / run_id
+    clone_path = ws_dir / repo_name
+    ws_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        result = subprocess.run(
+            ["git", "clone", "--local", str(src), str(clone_path)],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            return {"status": "error", "details": result.stderr}
+    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        return {"status": "error", "details": str(exc)}
+
+    # Repoint origin to the fork's GitHub URL (try 'origin' first, then 'upstream')
+    for remote_name in ("origin", "upstream"):
+        try:
+            r = subprocess.run(
+                ["git", "remote", "get-url", remote_name],
+                capture_output=True, text=True, timeout=15,
+                cwd=str(src),
+            )
+            if r.returncode == 0:
+                github_url = r.stdout.strip()
+                # Only accept actual GitHub URLs; skip local file paths
+                if github_url.startswith("https://github.com") or github_url.startswith("git@github.com"):
+                    subprocess.run(
+                        ["git", "remote", "set-url", "origin", github_url],
+                        cwd=str(clone_path), capture_output=True, text=True, timeout=15,
+                    )
+                    break
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            continue
+
+    return {"status": "cloned", "clone_path": str(clone_path)}
 
 
 def _get_current_branch(workspace_path: str) -> str:
@@ -335,16 +396,22 @@ async def run_developer_pipeline(request: DevRequest) -> dict:
 
     # Step 1 — Prepare workspace (mode-dependent)
     if request.mode == "existing-repo":
-        # Use the provided local path directly; skip ensure_fork / clone_fork
-        workspace_path = str(Path(request.local_path).resolve())
-
+        # Clone the user's local checkout into the isolated workspace (~/.tfdev/ws/).
+        # Only committed changes are visible in the clone; uncommitted work must be
+        # committed locally first.
+        src_path = str(Path(request.local_path).resolve())
         if not fork_owner:
-            fork_owner = _get_fork_owner_from_remote(workspace_path)
+            fork_owner = _get_fork_owner_from_remote(src_path)
         fork_repo = f"{fork_owner}/{repo_name}" if fork_owner else repo_name
 
+        clone_result = _clone_local_repo_to_workspace(src_path, request.run_id, repo_name)
+        if clone_result.get("status") != "cloned":
+            return {"outcome": "error", "errors": [f"local clone failed: {clone_result}"]}
+        workspace_path = clone_result["clone_path"]
+
         branch_name = _get_current_branch(workspace_path)
-        if not branch_name:
-            # Fall back to generating a new branch name
+        if not branch_name or not _BRANCH_RE.match(branch_name):
+            # Current branch doesn't match agent convention — create one
             branch_name = request.auto_branch_name()
             branch_result = json.loads(create_branch(workspace_path, branch_name, request.base_ref))
             if branch_result.get("status") != "created":
@@ -353,12 +420,19 @@ async def run_developer_pipeline(request: DevRequest) -> dict:
         logger.info("existing-repo mode: workspace=%s branch=%s", workspace_path, branch_name)
 
     elif request.mode == "existing-pr":
-        # Clone the fork branch for the given PR; skip ensure_fork / sync
-        pr_details = _get_pr_details(request.upstream_repo, request.pr_number)
+        # Determine which repo hosts the PR.
+        # With --fork-owner: look in the fork (fork PRs / draft PRs within the fork).
+        # Without --fork-owner: look in upstream (upstream-targeted PRs from a fork).
+        pr_lookup_repo = (
+            f"{fork_owner}/{repo_name}" if fork_owner else request.upstream_repo
+        )
+        pr_details = _get_pr_details(pr_lookup_repo, request.pr_number)
         if not pr_details:
             return {
                 "outcome": "error",
-                "errors": [f"Could not fetch PR #{request.pr_number} from {request.upstream_repo}"],
+                "errors": [
+                    f"Could not fetch PR #{request.pr_number} from {pr_lookup_repo}"
+                ],
             }
 
         head_ref_name: str = pr_details.get("headRefName", "")
@@ -385,13 +459,17 @@ async def run_developer_pipeline(request: DevRequest) -> dict:
             return {"outcome": "error", "errors": [f"clone_fork (existing-pr) failed: {clone_result}"]}
 
         workspace_path = clone_result["clone_path"]
-        branch_name = head_ref_name
 
-        # Use the existing PR URL / number
-        pr_url_initial = f"https://github.com/{request.upstream_repo}/pull/{request.pr_number}"
+        # Create an agent-compliant branch from the PR head so push_branch guardrails pass.
+        # The existing PR is kept as the tracked PR so CI evidence and flip-ready target it.
+        branch_name = request.auto_branch_name()
+        branch_result = json.loads(create_branch(workspace_path, branch_name, head_ref_name))
+        if branch_result.get("status") != "created":
+            return {"outcome": "error", "errors": [f"create_branch (existing-pr) failed: {branch_result}"]}
+
         logger.info(
-            "existing-pr mode: workspace=%s branch=%s pr=%s",
-            workspace_path, branch_name, pr_url_initial,
+            "existing-pr mode: workspace=%s new branch=%s (from PR head %s)",
+            workspace_path, branch_name, head_ref_name,
         )
 
     else:

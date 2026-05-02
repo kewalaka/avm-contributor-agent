@@ -281,13 +281,29 @@ class DevRequest:
                     "upstream_repo must be in owner/repo format with both parts non-empty"
                 )
 
-        if self.mode == "issue-driven" and self.issue_number is None:
+        # Exactly one starting-point input must be provided
+        starting_inputs = [
+            ("--issue", self.issue_number is not None),
+            ("--existing-repo", bool(self.local_path)),
+            ("--pr", self.pr_number is not None),
+        ]
+        active = [name for name, set_ in starting_inputs if set_]
+        if len(active) > 1:
+            errors.append(
+                f"conflicting starting points ({', '.join(active)}): provide exactly one of "
+                "--issue, --existing-repo, or --pr"
+            )
+        elif len(active) == 0:
             errors.append(
                 "a starting point is required: provide --issue, --existing-repo, or --pr"
             )
 
-        if self.mode == "existing-repo" and not Path(self.local_path).exists():
-            errors.append(f"local_path does not exist: {self.local_path}")
+        if self.mode == "existing-repo":
+            local = Path(self.local_path)
+            if not local.exists():
+                errors.append(f"local_path does not exist: {self.local_path}")
+            elif not (local / ".git").exists():
+                errors.append(f"local_path is not a git repository (no .git found): {self.local_path}")
 
         if errors:
             raise ValueError(
