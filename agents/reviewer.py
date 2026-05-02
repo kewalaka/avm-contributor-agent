@@ -1,61 +1,95 @@
-"""Reviewer agent -- cross-checks analysis findings with fresh context.
-
-This agent exists to combat context fog. It receives the analysis findings
-and the raw evidence, and validates each finding independently. It catches
-false positives, confirms real issues, and adds reviewer notes.
-"""
+"""Reviewer agent — pre-push diff gatekeeper for the maker/checker pipeline."""
 
 from __future__ import annotations
 
-from agents.base import create_specialist
+import json
 
-from tools.analysis import read_upgrade_doc
-from tools.module_discovery import read_module_skill
-from tools.terraform import list_workspace_files, read_workspace_file
+from agents.base import create_specialist
+from models import DiffReview
+
 
 REVIEWER_INSTRUCTIONS = """\
-You are the Reviewer Agent, a specialist in validating test findings.
+You are the Reviewer agent in the tf-module-developer-agent pipeline.
+Your job is to evaluate code diffs BEFORE they are pushed to a fork branch.
 
-You receive AnalysisFinding objects from the Analysis Agent. For each finding,
-you independently verify it using the available evidence. Your fresh context
-means you're not affected by earlier context fog from deployment output.
+You evaluate three dimensions:
+1. INTENT: Does the diff match the stated task? No extra changes unrelated to the issue.
+2. SCOPE: Is the diff clean? No auto-generated files, no whitespace-only changes in unrelated files,
+   no lock file mutations unless explicitly required.
+3. AVM CONVENTIONS: Does the diff follow Azure Verified Modules conventions?
+   - Variables use snake_case
+   - Outputs match AVM interface spec (id, resource)
+   - No hardcoded locations (use var.location)
+   - Required AVM metadata (module_version, etc.) present if touched
+   - No provider version pins added unless necessary
 
-For each finding, determine:
-- **confirmed**: The finding is valid and accurately described.
-- **rejected**: The finding is a false positive or misinterpretation.
-- **needs_investigation**: Cannot determine validity from available evidence.
+Respond with a JSON object matching this schema:
+{
+  "verdict": "approved" | "rejected" | "needs_changes",
+  "intent_matches": true/false,
+  "scope_clean": true/false,
+  "conventions_ok": true/false,
+  "issues": ["specific problem 1", ...],
+  "suggestions": ["optional improvement 1", ...],
+  "reviewer_notes": "brief summary"
+}
 
-Verification steps:
-1. Read the evidence provided with the finding.
-2. If the finding references UPGRADE.md, read it yourself and verify.
-3. If the finding relates to AzAPI patterns, read the AzAPI.md skill.
-4. Check if the finding's severity is appropriate.
-5. Look for context the analysis agent may have missed.
-
-Output format: Return a JSON array of ReviewedFinding objects:
-[
-  {
-    "finding": { ... original finding ... },
-    "verdict": "confirmed|rejected|needs_investigation",
-    "reviewer_notes": "Explanation of your assessment"
-  }
-]
-
-Rules:
-- Be skeptical but fair. Not every finding is wrong.
-- Provide clear reasoning for rejections.
-- If you lack evidence to verify, mark as needs_investigation (not rejected).
-- A finding can be partially correct -- confirm the valid part and note caveats.
+Be concise. Only flag genuine problems. Do not reject diffs for stylistic preferences.
 """
 
-REVIEWER_TOOLS = [
-    read_upgrade_doc,
-    read_module_skill,
-    list_workspace_files,
-    read_workspace_file,
-]
 
+async def review_diff(
+    diff: str,
+    task_description: str,
+    issue_context: str,
+    branch_name: str = "",
+) -> DiffReview:
+    """Review a diff before push and return a structured verdict."""
+    if not diff or not diff.strip():
+        return DiffReview(
+            branch_name=branch_name,
+            verdict="approved",
+            reviewer_notes="Empty diff — nothing to review",
+        )
 
-def create_reviewer_agent():
-    """Create the reviewer specialist agent."""
-    return create_specialist("reviewer", REVIEWER_INSTRUCTIONS, REVIEWER_TOOLS)
+    agent = create_specialist("reviewer", REVIEWER_INSTRUCTIONS, [])
+
+    message = (
+        f"Task: {task_description}\n\n"
+        f"Issue context:\n{issue_context}\n\n"
+        f"Diff to review (branch: {branch_name}):\n"
+        f"```diff\n{diff}\n```\n\n"
+        "Review this diff against the three dimensions (intent, scope, AVM conventions)."
+    )
+
+    response = await agent.get_response(message)
+
+    try:
+        # Strip markdown code fences if the model wrapped the JSON
+        text = response.strip()
+        if text.startswith("```"):
+            text = text.split("```", 2)[1]
+            if text.startswith("json"):
+                text = text[4:]
+            text = text.rsplit("```", 1)[0].strip()
+
+        data = json.loads(text)
+        return DiffReview(
+            branch_name=branch_name,
+            verdict=data.get("verdict", "needs_changes"),
+            intent_matches=data.get("intent_matches", True),
+            scope_clean=data.get("scope_clean", True),
+            conventions_ok=data.get("conventions_ok", True),
+            issues=data.get("issues", []),
+            suggestions=data.get("suggestions", []),
+            reviewer_notes=data.get("reviewer_notes", ""),
+        )
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return DiffReview(
+            branch_name=branch_name,
+            verdict="needs_changes",
+            intent_matches=True,
+            scope_clean=True,
+            conventions_ok=True,
+            reviewer_notes="Reviewer response was not valid JSON — treat as needs_changes",
+        )
