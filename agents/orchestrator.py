@@ -147,8 +147,19 @@ def _clone_local_repo_to_workspace(local_path: str, run_id: str, repo_name: str)
             )
             if r.returncode == 0:
                 github_url = r.stdout.strip()
-                # Only accept actual GitHub URLs; skip local file paths
-                if github_url.startswith("https://github.com") or github_url.startswith("git@github.com"):
+                # Only accept actual GitHub URLs; skip local file paths.
+                # Validate with urllib.parse to avoid substring-match bypasses.
+                try:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(github_url)
+                    is_github_https = (
+                        parsed.scheme == "https"
+                        and parsed.netloc == "github.com"
+                    )
+                except Exception:
+                    is_github_https = False
+                is_github_ssh = re.match(r"^git@github\.com:[^/]+/.+\.git$", github_url) is not None
+                if is_github_https or is_github_ssh:
                     subprocess.run(
                         ["git", "remote", "set-url", "origin", github_url],
                         cwd=str(clone_path), capture_output=True, text=True, timeout=15,
@@ -411,7 +422,7 @@ async def run_developer_pipeline(request: DevRequest) -> dict:
 
         branch_name = _get_current_branch(workspace_path)
         if not branch_name or not _BRANCH_RE.match(branch_name):
-            # Current branch doesn't match agent convention — create one
+            # Current branch doesn't match agent convention - create one
             branch_name = request.auto_branch_name()
             branch_result = json.loads(create_branch(workspace_path, branch_name, request.base_ref))
             if branch_result.get("status") != "created":
