@@ -62,24 +62,77 @@ def _load_prompt_file(filename: str) -> str:
         return ""
 
 
+def _run_avm_precommit(workspace_path: str) -> bool:
+    """Run ./avm pre-commit in the module workspace to align and generate the AVM skill file.
+
+    Returns True if the command completed successfully (exit code 0).
+    """
+    import subprocess
+
+    avm_bin = Path(workspace_path) / "avm"
+    if not avm_bin.is_file() or not os.access(avm_bin, os.X_OK):
+        logger.warning("./avm not found or not executable in %s — cannot auto-generate skill", workspace_path)
+        return False
+
+    logger.info("Running ./avm pre-commit in %s to generate AVM skill file", workspace_path)
+    result = subprocess.run(
+        ["./avm", "pre-commit"],
+        cwd=workspace_path,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    if result.returncode == 0:
+        logger.info("./avm pre-commit succeeded")
+        return True
+    logger.warning(
+        "./avm pre-commit exited %d:\n%s\n%s",
+        result.returncode,
+        result.stdout[-2000:],
+        result.stderr[-2000:],
+    )
+    return False
+
+
 def _load_module_skill_content(workspace_path: str) -> str | None:
-    """Scan the module workspace for an AVM skill file and return its content."""
+    """Scan the module workspace for an AVM skill file and return its content.
+
+    If the skill file is absent, runs ``./avm pre-commit`` to align the module and
+    generate it, then re-scans.  Returns None only if the file is still missing after
+    that attempt.
+    """
     ws = Path(workspace_path)
-    candidates = [
-        ws / ".agents" / "skills" / "AVM-Terraform-Development" / "SKILL.md",
-        ws / ".agents" / "skills" / "AVM-Terraform-Development.md",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            logger.info("Found module skill: %s", candidate)
-            return candidate.read_text(encoding="utf-8")
-    # Fallback: any .md in the skill directory
-    skill_dir = ws / ".agents" / "skills" / "AVM-Terraform-Development"
-    if skill_dir.is_dir():
-        for md_file in sorted(skill_dir.glob("*.md")):
-            logger.info("Found module skill (fallback): %s", md_file)
-            return md_file.read_text(encoding="utf-8")
-    logger.warning("No module skill found in %s — using additive instructions only", workspace_path)
+
+    def _scan() -> str | None:
+        candidates = [
+            ws / ".agents" / "skills" / "AVM-Terraform-Development" / "SKILL.md",
+            ws / ".agents" / "skills" / "AVM-Terraform-Development.md",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                logger.info("Found module skill: %s", candidate)
+                return candidate.read_text(encoding="utf-8")
+        skill_dir = ws / ".agents" / "skills" / "AVM-Terraform-Development"
+        if skill_dir.is_dir():
+            for md_file in sorted(skill_dir.glob("*.md")):
+                logger.info("Found module skill (fallback): %s", md_file)
+                return md_file.read_text(encoding="utf-8")
+        return None
+
+    content = _scan()
+    if content is not None:
+        return content
+
+    # Skill absent — run ./avm pre-commit to generate it then retry
+    if _run_avm_precommit(workspace_path):
+        content = _scan()
+        if content is not None:
+            return content
+
+    logger.warning(
+        "No AVM skill file found in %s after ./avm pre-commit — developer will use additive instructions only",
+        workspace_path,
+    )
     return None
 
 
