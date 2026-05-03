@@ -17,7 +17,7 @@ A two-agent CLI pipeline that fixes AVM Terraform module issues automatically:
 ## Agent framework
 
 | Concern | Detail |
-|---------|--------|
+| ------- | ------ |
 | Class | `ChatAgent` (not `Agent`) from `agent_framework` |
 | Client | `AzureAIAgentClient` (not `AzureAIAgentClient` raw) |
 | Tool decorator | `@ai_function` (not `@tool`) |
@@ -29,7 +29,7 @@ A two-agent CLI pipeline that fixes AVM Terraform module issues automatically:
 
 ## Entry points
 
-```
+```python
 python main.py dev   --upstream-repo Azure/terraform-azurerm-avm-res-... \
                      --issue 167 [--fork-owner kewalaka]
 python main.py dev   --upstream-repo ...  --pr 2  --fork-owner kewalaka
@@ -47,7 +47,7 @@ python main.py test  # legacy test-only path (preserved; separate from dev pipel
 `request.py::DevRequest.mode` returns one of three strings:
 
 | Mode | Trigger field | Behaviour |
-|------|--------------|-----------|
+| ---- | ------------- | --------- |
 | `issue-driven` | `issue_number` set | fork → sync → clone → branch → fix |
 | `existing-repo` | `local_path` set | local `git clone --local` into `~/.tfdev/ws/` → branch → fix |
 | `existing-pr` | `pr_number` set | clone fork head branch → new agent branch → continue |
@@ -59,7 +59,7 @@ python main.py test  # legacy test-only path (preserved; separate from dev pipel
 ## File map
 
 | Path | Role |
-|------|------|
+| ---- | ---- |
 | `agents/orchestrator.py` | Pipeline driver (~800 lines); `run_developer_pipeline` entry point |
 | `agents/reviewer.py` | Pre-push diff gatekeeper; returns `DiffReview` |
 | `agents/base.py` | `create_specialist` factory; `AgentResult` dataclass |
@@ -80,14 +80,14 @@ python main.py test  # legacy test-only path (preserved; separate from dev pipel
 ## Auth model
 
 | Credential | Env var | Scope | Used by |
-|-----------|---------|-------|--------|
+| ---------- | ------- | ----- | ------- |
 | GitHub CLI session | — (run `gh auth login`) | Developer's account — fork, issue, PR ops | `tools/github_ops.py`, subprocess `gh` calls |
 | Fine-grained PAT | `AGENT_DISPATCH_TOKEN` | `kewalaka/avm-contributions` only (Actions:RW, Contents:R, Metadata:R) | `tools/dispatch_ci.py` — never touches other repos |
 | Azure workload identity | — (DefaultAzureCredential) | Foundry AI project | `agents/base.py::create_specialist` |
 
 Required env vars:
 
-```
+```text
 AZURE_AI_PROJECT_ENDPOINT   # Foundry project endpoint URL
 MODEL_DEPLOYMENT_NAME       # defaults to gpt-4.1
 AGENT_DISPATCH_TOKEN        # fine-grained PAT (see above)
@@ -135,7 +135,7 @@ Always runs `./avm pre-commit` at pipeline start regardless — it aligns the mo
 `tools/dispatch_ci.py` — sends `repository_dispatch` to `kewalaka/avm-contributions`, then polls until the run completes (up to 3600s). Returns structured JSON payloads; the Developer/Reviewer agents never see raw GHA stdout.
 
 | Function | Event type | When used |
-|----------|-----------|-----------|
+| -------- | ---------- | --------- |
 | `dispatch_module_checks` | `module-checks` | After every successful Reviewer pass |
 | `dispatch_module_e2e` | `module-e2e` | When checks pass, before flipping PR ready |
 | `dispatch_upgrade_test` | `module-upgrade` | **Not yet wired into orchestrator** (issue #16) |
@@ -161,7 +161,7 @@ Always runs `./avm pre-commit` at pipeline start regardless — it aligns the mo
 ## Open issues (as of this PR)
 
 | # | Title | Status |
-|---|-------|--------|
+| --- | ----- | ------ |
 | #15 | Add `run_precommit_and_commit`, `terraform_validate`, `terraform_plan` tools to Developer | Open — tools not yet in `DEVELOPER_TOOLS` |
 | #16 | Wire `dispatch_upgrade_test` into orchestrator success path | Open — function exists, not called |
 | #17 | Surface unresolved PR review comments to Developer in `existing-pr` mode | Open |

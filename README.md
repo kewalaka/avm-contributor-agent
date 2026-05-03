@@ -1,29 +1,11 @@
-# avm-contributor-agent
+# AVM Contributor Agent
 
 An AI-powered developer agent for [Azure Verified Modules (AVM)](https://azure.github.io/Azure-Verified-Modules/)
-Terraform modules. It takes GitHub issues from upstream AVM repositories, implements fixes on a fork,
-gates them through an LLM reviewer, dispatches deterministic CI to
-[`kewalaka/avm-contributions`](https://github.com/kewalaka/avm-contributions), and opens upstream PRs
-with evidence.
+Terraform modules.
 
 Built with the [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) (Python).
 
----
-
-## Architecture
-
-```
-Developer (maker)
-    │  implements code changes on fork branch
-    ▼
-Reviewer (checker)
-    │  approves / requests changes / rejects diff
-    ▼
-kewalaka/avm-contributions CI
-    │  module-checks, module-e2e, module-upgrade workflows
-    ▼
-Upstream PR with UPGRADE.md evidence
-```
+![Architecture overview](docs/overview.drawio.svg)
 
 **Key principles:**
 
@@ -73,11 +55,6 @@ python main.py dev \
   --fork-owner <your-github-org>
 ```
 
-> **Pre-flight for best results:** If you have a local checkout of the module,
-> run `./avm pre-commit` inside it first. This generates
-> `.agents/skills/AVM-Terraform-Development/SKILL.md` which the Developer agent
-> will load automatically for module-specific guidance.
-
 ---
 
 ## Quick Start — Foundry (existing AI landing zone)
@@ -107,7 +84,7 @@ of your Foundry resource in the Azure portal (format:
 ## Configuration
 
 | Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
+| -------- | -------- | ------- | ----------- |
 | `AZURE_AI_PROJECT_ENDPOINT` | **Yes** | — | Foundry project endpoint URL |
 | `AGENT_DISPATCH_TOKEN` | **Yes** | — | Fine-grained PAT for `kewalaka/avm-contributions` CI dispatch |
 | `MODEL_DEPLOYMENT_NAME` | No | `gpt-4.1` | Model deployment name in your Foundry project |
@@ -121,19 +98,19 @@ of your Foundry resource in the Azure portal (format:
 
 ## CLI Reference
 
-```
+```text
 python main.py <subcommand> [options]
 ```
 
 | Subcommand | Description |
-|------------|-------------|
+| ---------- | ----------- |
 | `dev` | **Developer pipeline** — fork, implement, review, dispatch CI, open PR |
 | `chat` | Interactive chat mode (single agent, local or Foundry-hosted) |
 | `test` | Legacy batch test-request mode |
 
 ### `dev` options
 
-```
+```text
 --upstream-repo   OWNER/REPO   Upstream AVM module repository (required)
 --fork-owner      OWNER        GitHub org/user that owns your fork
 --base-ref        REF          Base branch (default: main)
@@ -147,7 +124,7 @@ Starting-point (exactly one required):
 #### Mode behaviour
 
 | Mode | Trigger | What the agent does |
-|------|---------|---------------------|
+| ---- | ------- | ------------------- |
 | `issue-driven` | `--issue N` | Forks upstream, clones, creates branch, implements from scratch |
 | `existing-pr` | `--pr N` | Fetches PR head branch, clones it, creates agent branch, continues from current state |
 | `existing-repo` | `--existing-repo PATH` | Clones local checkout to `~/.tfdev/ws/`, continues from current state |
@@ -163,7 +140,7 @@ The agent dispatches to `kewalaka/avm-contributions` using `repository_dispatch`
 events authenticated with `AGENT_DISPATCH_TOKEN`. Three workflows are available:
 
 | Event | Workflow | Purpose |
-|-------|----------|---------|
+| ----- | -------- | ------- |
 | `module-checks` | `checks.yml` | Linting and pre-commit validation |
 | `module-e2e` | `e2e-tests.yml` | Full `terraform apply` + idempotency on examples |
 | `module-upgrade` | `upgrade-tests.yml` | Two-phase upgrade: apply base → plan head, diff outputs |
@@ -187,8 +164,6 @@ to feed back into the Developer/Reviewer loop.
 ## Deploy to Foundry
 
 See [agent.yaml](agent.yaml) for the hosted agent definition.
-Follow the [hosted agents quickstart](https://learn.microsoft.com/azure/ai-services/agents/quickstart-hosted-agents)
-to push the container and register the agent in your Foundry project.
 
 ---
 
