@@ -1,4 +1,4 @@
-name: tf-module-developer-agent
+name: avm-contributor-agent
 description: >
   AVM module developer agent. Takes GitHub issues from upstream Azure Verified
   Module repos, writes code diffs on fork branches, dispatches CI to

@@ -47,7 +47,7 @@ _MAX_ATTEMPTS = 3
 _BRANCH_RE = re.compile(r"^agent/(issue-\d+|manual)-[a-z0-9-]+$")
 
 _DEVELOPER_INSTRUCTIONS_FALLBACK = """\
-You are the Developer agent in the tf-module-developer-agent pipeline.
+You are the Developer agent in the avm-contributor-agent pipeline.
 Your job is to implement a GitHub issue fix on an AVM Terraform module fork.
 Follow AVM Terraform conventions: snake_case names, required outputs (id, resource),
 no hardcoded locations, azapi preferred for new resources.

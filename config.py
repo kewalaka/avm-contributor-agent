@@ -1,4 +1,4 @@
-"""Configuration model for the tf-module-developer-agent."""
+"""Configuration model for the avm-contributor-agent."""
 
 import os
 import subprocess

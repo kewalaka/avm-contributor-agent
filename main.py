@@ -1,4 +1,4 @@
-"""tf-module-developer-agent — entry point.
+"""avm-contributor-agent — entry point.
 
 An AVM module developer assistant built with the Microsoft Agent Framework.
 Takes GitHub issues from upstream AVM repos, implements fixes on a fork,
@@ -97,7 +97,7 @@ from tools.tracking import (
 )
 
 SYSTEM_INSTRUCTIONS = """\
-You are the tf-module-developer-agent — an AVM module developer assistant.
+You are the avm-contributor-agent — an AVM module developer assistant.
 
 You take GitHub issues from upstream AVM repositories, implement fixes on a fork,
 dispatch CI to kewalaka/avm-contributions via repository_dispatch, and open PRs
@@ -168,7 +168,7 @@ ALL_TOOLS = [
 def build_cli_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser with subcommands."""
     parser = argparse.ArgumentParser(
-        description="tf-module-developer-agent — AVM module developer assistant",
+        description="avm-contributor-agent — AVM module developer assistant",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="subcommand")

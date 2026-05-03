@@ -1,4 +1,4 @@
-# tf-module-developer-agent
+# avm-contributor-agent
 
 An AI-powered developer agent for [Azure Verified Modules (AVM)](https://azure.github.io/Azure-Verified-Modules/)
 Terraform modules. It takes GitHub issues from upstream AVM repositories, implements fixes on a fork,
@@ -55,8 +55,8 @@ Upstream PR with UPGRADE.md evidence
 ## Quick Start — Local
 
 ```bash
-git clone https://github.com/kewalaka/tf-module-developer-agent
-cd tf-module-developer-agent
+git clone https://github.com/kewalaka/avm-contributor-agent
+cd avm-contributor-agent
 
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt

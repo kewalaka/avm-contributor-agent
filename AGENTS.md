@@ -1,4 +1,4 @@
-# AGENTS.md — tf-module-developer-agent
+# AGENTS.md — avm-contributor-agent
 
 Orientation for any agent working in this repo.
 
@@ -170,7 +170,7 @@ Phase 5 E2E smoke (`Azure/terraform-azurerm-avm-res-app-managedenvironment` issu
 
 ## Known gotchas
 
-- **Repo rename**: GitHub repo is `kewalaka/tf-module-developer-agent`; the git remote still redirects from the old name `kewalaka/tfmodule-testing-agent`. MCP `github-issue_write` returns 404 on write ops — use `gh issue create --repo kewalaka/tf-module-developer-agent` instead.
+- **Repo rename**: GitHub repo is `kewalaka/avm-contributor-agent`; the git remote still redirects from the old name `kewalaka/avm-contributor-agent`. MCP `github-issue_write` returns 404 on write ops — use `gh issue create --repo kewalaka/avm-contributor-agent` instead.
 - **`config.py` singleton**: defined twice at the bottom of the file (lines 84 and 87 — duplicate). Harmless but should be cleaned up.
 - **`dispatch_ci.py` polls only**: no webhook callback yet. CI results consumed by polling. Phase 7 adds push-based delivery.
 - **`existing-pr` PR lookup**: with `--fork-owner`, looks in the fork repo (for fork-internal draft PRs), not upstream. Without it, looks in upstream. This is intentional.

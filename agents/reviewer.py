@@ -12,7 +12,7 @@ from models import DiffReview
 logger = logging.getLogger(__name__)
 
 _REVIEWER_INSTRUCTIONS_FALLBACK = """\
-You are the Reviewer agent in the tf-module-developer-agent pipeline.
+You are the Reviewer agent in the avm-contributor-agent pipeline.
 Evaluate diffs for intent, scope, and AVM conventions before push.
 Respond with a JSON object: verdict, intent_matches, scope_clean,
 conventions_ok, issues, suggestions, reviewer_notes.
