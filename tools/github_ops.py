@@ -358,7 +358,7 @@ def update_pr_body_section(
     pattern = rf"<!-- agent:{re.escape(section_name)} -->.*?<!-- /agent:{re.escape(section_name)} -->"
 
     if re.search(pattern, body, flags=re.DOTALL):
-        new_body = re.sub(pattern, new_region, body, flags=re.DOTALL)
+        new_body = re.sub(pattern, lambda _m: new_region, body, flags=re.DOTALL)
     else:
         new_body = body + "\n\n" + new_region
 

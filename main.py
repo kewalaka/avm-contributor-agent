@@ -6,9 +6,9 @@ dispatches CI to kewalaka/avm-contributions via repository_dispatch, and
 opens PRs with UPGRADE.md evidence.
 
 Subcommands:
-  dev (default)  Run the Developer→Reviewer→CI pipeline on an upstream issue.
-  chat           Interactive chat mode (single agent, local or Foundry-hosted).
-  test           Legacy batch test-request mode.
+  dev    Run the Developer→Reviewer→CI pipeline on an upstream issue.
+  chat   Interactive chat mode (single agent, local or Foundry-hosted). Default if no subcommand given.
+  test   Legacy batch test-request mode.
 
 Examples:
   python main.py dev --upstream-repo Azure/terraform-azurerm-avm-res-app-managedenvironment --issue 42

@@ -126,7 +126,7 @@ All agent work happens under `~/.tfdev/ws/<run_id>/<repo_name>/`.
 2. If absent, runs `./avm pre-commit` (deterministic; generates SKILL.md as a side effect)
 3. If still absent, falls back to `_DEVELOPER_INSTRUCTIONS_FALLBACK`
 
-Always runs `./avm pre-commit` at pipeline start regardless — it aligns the module before the Developer sees it. The Developer also runs `run_precommit_and_commit` post-implementation (issue #15 — not yet wired).
+Always runs `./avm pre-commit` at pipeline start regardless — it aligns the module before the Developer sees it. The Developer also runs `run_precommit_and_commit` post-implementation as a deterministic step (issue #15 — tools not yet wired into `DEVELOPER_TOOLS`).
 
 ---
 
@@ -173,6 +173,7 @@ Phase 5 E2E smoke (`Azure/terraform-azurerm-avm-res-app-managedenvironment` issu
 
 ## Known gotchas
 
-- **`config.py` singleton**: defined twice at the bottom of the file (lines 84 and 87 — duplicate). Harmless but should be cleaned up.
 - **`dispatch_ci.py` polls only**: no webhook callback yet. CI results consumed by polling. Phase 7 adds push-based delivery.
 - **`existing-pr` PR lookup**: with `--fork-owner`, looks in the fork repo (for fork-internal draft PRs), not upstream. Without it, looks in upstream. This is intentional.
+- **`dispatch_upgrade_test` is unwired**: the function exists in `tools/dispatch_ci.py` but is never called by the orchestrator (issue #16).
+- **`chat` is the bare default**: running `python main.py` with no subcommand launches `chat`, not `dev`.

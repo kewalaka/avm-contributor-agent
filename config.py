@@ -62,7 +62,7 @@ class AgentConfig:
                 "(kewalaka/avm-contributions, Actions:RW, Contents:R, Metadata:R)"
             )
         result = subprocess.run(
-            ["gh", "auth", "status"], capture_output=True, text=True
+            ["gh", "auth", "status"], capture_output=True, text=True, timeout=10
         )
         if result.returncode != 0:
             issues.append(
@@ -78,10 +78,6 @@ class AgentConfig:
             or self.azure_mcp_connection_id
             or self.eva_mcp_server_url
         )
-
-
-# Singleton used by tools
-config = AgentConfig()
 
 # Singleton used by tools
 config = AgentConfig()

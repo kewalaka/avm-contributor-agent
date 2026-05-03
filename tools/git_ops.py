@@ -14,6 +14,9 @@ _WORK_ROOT = Path(tempfile.gettempdir()) / "infra-agent-work"
 _AGENT_WS_ROOT = Path.home() / ".tfdev" / "ws"
 _STATE_ROOT = Path.home() / ".tfdev" / "state"
 
+_WORK_ROOT.mkdir(parents=True, exist_ok=True)
+_AGENT_WS_ROOT.mkdir(parents=True, exist_ok=True)
+
 
 def _workspace_path(workspace_id: str) -> Path:
     """Return the on-disk path for a given workspace id."""
@@ -412,7 +415,7 @@ def push_branch(
         return json.dumps({"error": f"Could not parse owner from remote URL: {remote_url}"})
     if owner.lower().startswith("azure"):
         return json.dumps({"error": f"Refusing to push: remote owner '{owner}' appears to be an upstream Azure org"})
-    if owner != fork_owner:
+    if owner.lower() != fork_owner.lower():
         return json.dumps({
             "error": f"Remote owner mismatch: expected '{fork_owner}', got '{owner}' (url: {remote_url})"
         })

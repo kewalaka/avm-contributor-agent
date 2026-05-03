@@ -277,6 +277,7 @@ def dispatch_module_e2e(
             "dispatch_id": dispatch_id,
             "source": module_repo,
             "branch": module_ref,
+            **({"example": example} if example else {}),
         },
     )
     if dispatch_result["status"] != "dispatched":
