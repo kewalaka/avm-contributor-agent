@@ -86,6 +86,16 @@ Phase 1–6 architecture is forward-compatible.
 - [ ] GitHub App for `check_suite` + custom `ci-result` events
 - [ ] Replace polling with push-based result delivery
 
+## Future Track — GitHub Actions Agentic Intake
+
+Automated issue triage and module selection before dispatching the developer pipeline.
+Depends on the Phase 7 HTTP API endpoint.
+
+- [ ] GHA workflow: receive `issues` webhook → triage AVM module affected
+- [ ] Module selection: map issue labels/body to upstream module repo
+- [ ] Trigger dispatch: invoke developer pipeline API with resolved `--upstream-repo` + `--issue`
+- [ ] Relates to `docs/intake-github-agentic-actions.drawio.svg`
+
 ## External Track — avm-contributions upgrades
 
 Work in `kewalaka/avm-contributions`, not here.
