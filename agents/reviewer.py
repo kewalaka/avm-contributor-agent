@@ -57,7 +57,7 @@ async def review_diff(
             reviewer_notes="Empty diff — nothing to review",
         )
 
-    agent = create_specialist("reviewer", _REVIEWER_INSTRUCTIONS, [])
+    agent = create_specialist("reviewer", _REVIEWER_INSTRUCTIONS, [], mcp_tools=[])
 
     message = (
         f"Task: {task_description}\n\n"

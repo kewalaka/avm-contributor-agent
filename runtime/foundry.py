@@ -26,8 +26,19 @@ logger = logging.getLogger(__name__)
 GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp"
 
 
-def _build_mcp_tools() -> list[MCPTool]:
-    """Build MCPTool declarations from config."""
+def build_mcp_tools() -> list[MCPTool]:
+    """Build MCPTool declarations from config.
+
+    Returns MCPTool objects for each configured MCP server.  These can be
+    passed in the ``tools`` list when creating an agent via AIProjectClient
+    or ChatAgent so that the agent has access to the MCP servers alongside
+    its local @ai_function tools.
+
+    Configured via environment variables:
+      - GITHUB_MCP_CONNECTION_ID  → GitHub MCP (issues, PRs, file reads)
+      - AZURE_MCP_CONNECTION_ID   → Azure MCP (resource queries)
+      - EVA_MCP_SERVER_URL        → EVA/AzAPI MCP (AzAPI resource discovery)
+    """
     tools: list[MCPTool] = []
 
     if config.github_mcp_connection_id:
@@ -65,6 +76,10 @@ def _build_mcp_tools() -> list[MCPTool]:
     return tools
 
 
+# Keep private alias for backwards compatibility within this module
+_build_mcp_tools = build_mcp_tools
+
+
 def create_agent(instructions: str) -> tuple[AIProjectClient, PromptAgentDefinition]:
     """Create a Foundry-hosted agent with MCP tools.
 
@@ -78,7 +93,7 @@ def create_agent(instructions: str) -> tuple[AIProjectClient, PromptAgentDefinit
         credential=credential,
     )
 
-    mcp_tools = _build_mcp_tools()
+    mcp_tools = build_mcp_tools()
     if mcp_tools:
         logger.info("Configuring %d MCP server(s)", len(mcp_tools))
 
