@@ -1,8 +1,20 @@
 .env
 __pycache__/
 *.pyc
+*.pyo
 .venv/
 *.egg-info/
 dist/
 build/
 tracking.db
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Terraform
+.terraform/
+**/.terraform/
+*.tfplan
+*.tfvars
+!*.tfvars.example
