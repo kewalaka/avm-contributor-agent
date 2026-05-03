@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from agent_framework import ai_function
 
-from tools.terraform import _workspace_path
+from tools.git_ops import _workspace_path
 
 
 @ai_function

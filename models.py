@@ -1,8 +1,8 @@
 """Shared data models for structured handoffs between agent phases.
 
 These dataclasses define the contract for passing data between tools and
-(eventually) between agents in the multi-agent topology.  All tool output
-should use these models to avoid dumping raw terraform output into context.
+between agents in the multi-agent topology.  All tool output should use
+these models to avoid dumping raw terraform output into context.
 """
 
 from __future__ import annotations
@@ -60,26 +60,6 @@ class IdempotencyResult:
 
 
 @dataclass
-class DeployResult:
-    """Structured output from deploying a single example."""
-
-    example: str
-    status: Literal["success", "failure", "timeout", "skipped"]
-    resources_created: int = 0
-    apply_duration_seconds: float = 0.0
-    idempotency: IdempotencyResult | None = None
-    plan_summary: PlanSummary | None = None
-    plan_json_path: str = ""
-    errors: list[str] = field(default_factory=list)
-
-    # Upgrade test fields (populated when head_ref is set)
-    upgrade: dict | None = None  # UpgradeTestResult from run_upgrade_test
-
-    def to_json(self) -> str:
-        return json.dumps(asdict(self), indent=2)
-
-
-@dataclass
 class AnalysisFinding:
     """A single finding from the analysis phase."""
 
@@ -111,13 +91,13 @@ class TestReport:
 
     module_source: str
     module_version: str = ""
-    deploy_results: list[DeployResult] = field(default_factory=list)
+    deploy_results: list[dict] = field(default_factory=list)
     findings: list[AnalysisFinding] = field(default_factory=list)
     reviewed_findings: list[ReviewedFinding] = field(default_factory=list)
 
     @property
     def has_failures(self) -> bool:
-        return any(r.status == "failure" for r in self.deploy_results)
+        return any(r.get("status") == "failure" for r in self.deploy_results)
 
     @property
     def has_breaking_changes(self) -> bool:
@@ -125,3 +105,56 @@ class TestReport:
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2)
+
+
+@dataclass
+class FixAttempt:
+    """Records one developer-agent fix iteration."""
+
+    attempt_number: int
+    branch_name: str
+    commit_sha: str = ""
+    reviewer_verdict: str = ""  # "approved" | "rejected" | "needs_changes"
+    reviewer_notes: str = ""
+    ci_dispatched: bool = False
+    ci_run_url: str = ""
+    ci_conclusion: str = ""  # "success" | "failure" | "error" | ""
+    diff_summary: str = ""  # short description of changes made
+
+
+@dataclass
+class CIResult:
+    """Structured result from a CI dispatch to kewalaka/avm-contributions."""
+
+    dispatch_id: str
+    workflow: str  # "module-checks" | "module-e2e" | "module-upgrade" | "module-tf-test"
+    run_id: str = ""
+    run_url: str = ""
+    conclusion: str = ""  # "success" | "failure" | "cancelled" | ""
+    artifacts_dir: str = ""
+    examples_tested: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    upgrade_summary: dict = field(default_factory=dict)
+    duration_s: float = 0.0
+
+    @property
+    def passed(self) -> bool:
+        return self.conclusion == "success"
+
+
+@dataclass
+class DiffReview:
+    """Reviewer agent's assessment of a code diff before push."""
+
+    branch_name: str
+    verdict: str  # "approved" | "rejected" | "needs_changes"
+    intent_matches: bool = True  # does diff match the stated task?
+    scope_clean: bool = True    # no unrelated changes?
+    conventions_ok: bool = True # follows AVM conventions?
+    issues: list[str] = field(default_factory=list)  # specific problems found
+    suggestions: list[str] = field(default_factory=list)
+    reviewer_notes: str = ""
+
+    @property
+    def approved(self) -> bool:
+        return self.verdict == "approved"

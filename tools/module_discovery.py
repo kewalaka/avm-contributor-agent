@@ -16,7 +16,7 @@ from pathlib import Path
 from agent_framework import ai_function
 
 from models import ModuleMap
-from tools.terraform import _workspace_path
+from tools.git_ops import _workspace_path
 
 
 def _scan_examples(module_root: Path) -> list[str]:

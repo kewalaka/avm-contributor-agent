@@ -11,6 +11,7 @@ examples to include, and WHERE to report results.  It can be created from:
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -215,3 +216,137 @@ class TestRequest:
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2)
+
+
+@dataclass
+class DevRequest:
+    """Structured input for a module development run.
+
+    Supports three operating modes:
+      - issue-driven:  upstream_repo + issue_number → fork + branch + PR
+      - existing-repo: local_path → CI dispatch + fix loop (skips fork/clone)
+      - existing-pr:   pr_number → clone fork branch + continue from current state
+    """
+
+    # Required
+    upstream_repo: str
+
+    # Issue-driven mode
+    issue_number: int | None = None
+
+    # Fork / branch
+    fork_owner: str = ""
+    branch_name: str = ""
+
+    # Unique run identifier
+    run_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+
+    # Existing-repo mode
+    local_path: str = ""
+
+    # Existing-PR mode
+    pr_number: int | None = None
+
+    # PR settings
+    base_ref: str = "main"
+
+    # Execution control
+    max_ci_retries: int = 3
+
+    # CI dispatch (one per CI run, populated from dev request context)
+    test_request: TestRequest = field(default_factory=TestRequest)
+
+    # --- Properties ---
+
+    @property
+    def mode(self) -> str:
+        if self.local_path:
+            return "existing-repo"
+        if self.pr_number is not None:
+            return "existing-pr"
+        return "issue-driven"
+
+    # --- Validation ---
+
+    def validate(self) -> None:
+        """Raise ValueError if the request is invalid."""
+        errors: list[str] = []
+
+        if not self.upstream_repo:
+            errors.append("upstream_repo is required")
+        else:
+            parts = self.upstream_repo.split("/")
+            if len(parts) != 2 or not parts[0] or not parts[1]:
+                errors.append(
+                    "upstream_repo must be in owner/repo format with both parts non-empty"
+                )
+
+        # Exactly one starting-point input must be provided
+        starting_inputs = [
+            ("--issue", self.issue_number is not None),
+            ("--existing-repo", bool(self.local_path)),
+            ("--pr", self.pr_number is not None),
+        ]
+        active = [name for name, set_ in starting_inputs if set_]
+        if len(active) > 1:
+            errors.append(
+                f"conflicting starting points ({', '.join(active)}): provide exactly one of "
+                "--issue, --existing-repo, or --pr"
+            )
+        elif len(active) == 0:
+            errors.append(
+                "a starting point is required: provide --issue, --existing-repo, or --pr"
+            )
+
+        if self.mode == "existing-repo":
+            local = Path(self.local_path)
+            if not local.exists():
+                errors.append(f"local_path does not exist: {self.local_path}")
+            elif not (local / ".git").exists():
+                errors.append(f"local_path is not a git repository (no .git found): {self.local_path}")
+
+        if errors:
+            raise ValueError(
+                "Invalid DevRequest:\n" + "\n".join(f"  - {e}" for e in errors)
+            )
+
+    # --- Helpers ---
+
+    def auto_branch_name(self, slug: str = "") -> str:
+        """Generate the canonical branch name for this run."""
+        clean = re.sub(r"[^a-z0-9\-]", "", slug.lower()[:40].replace(" ", "-"))
+        short_id = self.run_id[:6]
+        if self.mode == "issue-driven":
+            suffix = (
+                f"issue-{self.issue_number}-{clean}-{short_id}"
+                if clean
+                else f"issue-{self.issue_number}-{short_id}"
+            )
+        elif self.mode == "existing-pr":
+            suffix = (
+                f"manual-pr-{self.pr_number}-{clean}-{short_id}"
+                if clean
+                else f"manual-pr-{self.pr_number}-{short_id}"
+            )
+        else:
+            suffix = f"manual-{clean}-{short_id}" if clean else f"manual-{short_id}"
+        return f"agent/{suffix}"
+
+    def to_agent_message(self) -> str:
+        """Format this request as a structured message for the Developer agent."""
+        lines = [
+            f"Mode: {self.mode}",
+            f"Upstream: {self.upstream_repo}",
+        ]
+        if self.issue_number is not None:
+            lines.append(f"Issue: #{self.issue_number}")
+        if self.pr_number is not None:
+            lines.append(f"PR: #{self.pr_number}")
+        if self.local_path:
+            lines.append(f"Local path: {self.local_path}")
+        if self.fork_owner:
+            lines.append(f"Fork owner: {self.fork_owner}")
+        branch = self.branch_name or self.auto_branch_name()
+        lines.append(f"Branch: {branch}")
+        lines.append(f"Run ID: {self.run_id}")
+        return "\n".join(lines)

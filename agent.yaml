@@ -1,9 +1,10 @@
-name: infra-testing-agent
+name: avm-contributor-agent
 description: >
-  Infrastructure Testing Agent with expertise in Terraform, AVM, and Azure.
-  Tests module upgrades by deploying old versions, planning new versions,
-  and producing structured diff reports with idempotency checks.
-  Supports MCP server integration for GitHub, Azure, and EVA/AzAPI.
+  AVM module developer agent. Takes GitHub issues from upstream Azure Verified
+  Module repos, writes code diffs on fork branches, dispatches CI to
+  kewalaka/avm-contributions for deterministic test feedback, and opens PRs
+  with UPGRADE.md evidence. Two-agent maker/checker pipeline (Developer +
+  Reviewer). Supports Foundry-hosted mode with MCP server integration.
 template:
   kind: hosted
   protocols:
@@ -14,14 +15,11 @@ template:
       description: Microsoft Foundry project endpoint URL
     - name: MODEL_DEPLOYMENT_NAME
       description: Model deployment name (default gpt-4.1)
-    - name: DEFAULT_LOCATION
-      description: Azure region for test deployments
-    - name: DEFAULT_SUBSCRIPTION_ID
-      description: Target Azure subscription for test resource groups
-    - name: CLEANUP_ON_COMPLETE
-      description: Whether to destroy test resources after completion (true/false)
-    - name: TEST_RG_PREFIX
-      description: Naming prefix for test resource groups
+    - name: AGENT_DISPATCH_TOKEN
+      description: >
+        Fine-grained PAT for dispatching CI to kewalaka/avm-contributions.
+        Required scopes: Actions (read/write), Contents (read), Metadata (read).
+        Owner: kewalaka, repo: kewalaka/avm-contributions. Recommended expiry: 90 days.
     - name: FOUNDRY_HOSTED
       description: Set to 'true' to enable Foundry-hosted mode with MCP support
     - name: GITHUB_MCP_CONNECTION_ID
