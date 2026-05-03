@@ -18,12 +18,40 @@ A two-agent CLI pipeline that fixes AVM Terraform module issues automatically:
 
 | Concern | Detail |
 | ------- | ------ |
-| Class | `ChatAgent` (not `Agent`) from `agent_framework` |
-| Client | `AzureAIAgentClient` (not `AzureAIAgentClient` raw) |
-| Tool decorator | `@ai_function` (not `@tool`) |
+| Class | `ChatAgent` from `agent_framework` |
+| Client | `AzureAIAgentClient` from `agent_framework.azure` |
+| Tool decorator | `@ai_function` from `agent_framework` |
 | Invoke | `await agent.get_response(message_str)` |
-| Factory | `agents/base.py::create_specialist(name, instructions, tools)` |
+| Factory | `agents/base.py::create_specialist(name, instructions, tools, mcp_tools=None)` |
 | Config | `config.py::AgentConfig` — reads from env; singleton at `config.config` |
+
+---
+
+## MCP tools
+
+MCP (Model Context Protocol) servers extend specialist agents with server-side capabilities
+beyond local Python tools.  Two runtime tiers:
+
+| Mode | MCP | Local tools (`@ai_function`) |
+| ---- | --- | ----------------------------- |
+| Local (`FOUNDRY_HOSTED=false`) | None — gh CLI wrappers used instead | All tools in `DEVELOPER_TOOLS` |
+| Foundry-hosted (`FOUNDRY_HOSTED=true`) | GitHub + Azure + EVA/AzAPI (if configured) | Same local tools, plus MCPTool objects appended |
+
+`create_specialist()` in `agents/base.py` auto-injects MCP tools when both
+`config.foundry_hosted` and `config.has_mcp` are true.  Pass `mcp_tools=[]`
+explicitly to suppress injection.
+
+### Configured MCP servers
+
+| Env var | Server label | MCP URL | When to use |
+| ------- | ------------ | ------- | ----------- |
+| `GITHUB_MCP_CONNECTION_ID` | `github` | `https://api.githubcopilot.com/mcp` | Reading issues, PR content, repo files from GitHub without gh CLI |
+| `AZURE_MCP_CONNECTION_ID` | `azure` | `https://mcp.azure.com` | Querying Azure resources / ARM APIs |
+| `EVA_MCP_SERVER_URL` | `eva_azapi` | custom URL | AzAPI resource type discovery |
+
+`GITHUB_MCP_CONNECTION_ID` is the **Foundry project connection name** (not a PAT).
+Create it in your Foundry project → Settings → Connected Resources → GitHub.
+The `gh` CLI tools in `tools/github_ops.py` remain available as fallback in local mode.
 
 ---
 
@@ -62,16 +90,18 @@ python main.py test  # legacy test-only path (preserved; separate from dev pipel
 | ---- | ---- |
 | `agents/orchestrator.py` | Pipeline driver (~800 lines); `run_developer_pipeline` entry point |
 | `agents/reviewer.py` | Pre-push diff gatekeeper; returns `DiffReview` |
-| `agents/base.py` | `create_specialist` factory; `AgentResult` dataclass |
+| `agents/base.py` | `create_specialist` factory (auto-injects MCP tools in Foundry mode); `AgentResult` dataclass |
 | `agents/prompts/developer-additive.md` | Appended to module SKILL.md for Developer instructions |
 | `agents/prompts/reviewer-additive.md` | Appended to reviewer skill |
 | `agents/skills/avm-review-skill.md` | Static AVM review skill (Reviewer) |
+| `runtime/local.py` | Local-mode agent factory — `ChatAgent` + `AzureAIAgentClient`; no MCP |
+| `runtime/foundry.py` | Foundry-hosted agent factory — `build_mcp_tools()` builds MCPTool declarations; `create_agent` wires MCP into chat mode |
 | `tools/dispatch_ci.py` | `dispatch_module_checks`, `dispatch_module_e2e`, `dispatch_upgrade_test` — all use `AGENT_DISPATCH_TOKEN` via `urllib`, never `gh` |
 | `tools/fork_ops.py` | `ensure_fork`, `sync_fork_default_branch`, `clone_fork` |
 | `tools/git_ops.py` | `create_branch`, `commit_files`, `push_branch` (5 guardrails), `verify_branch_provenance` |
-| `tools/github_ops.py` | `create_pull_request`, `update_pr_body_section`, `flip_pr_ready`, `download_workflow_artifacts` |
+| `tools/github_ops.py` | `create_pull_request`, `update_pr_body_section`, `flip_pr_ready`, `download_workflow_artifacts` — gh CLI wrappers; local-mode fallback when GitHub MCP is absent |
 | `tools/module_discovery.py` | `discover_module_structure`, `ingest_local_module`, `list_module_examples`, `read_module_skill` |
-| `config.py` | `AgentConfig` (env vars); `validate_dev_mode()` checks `gh` auth + token |
+| `config.py` | `AgentConfig` (env vars); `validate_dev_mode()` checks `gh` auth + token; `has_mcp` property |
 | `request.py` | `DevRequest` + `TestRequest` dataclasses |
 | `models.py` | `FixAttempt`, `CIResult`, `DiffReview` |
 
@@ -81,9 +111,11 @@ python main.py test  # legacy test-only path (preserved; separate from dev pipel
 
 | Credential | Env var | Scope | Used by |
 | ---------- | ------- | ----- | ------- |
-| GitHub CLI session | — (run `gh auth login`) | Developer's account — fork, issue, PR ops | `tools/github_ops.py`, subprocess `gh` calls |
+| GitHub CLI session | — (run `gh auth login`) | Developer's account — fork, issue, PR ops | `tools/github_ops.py`, subprocess `gh` calls (local mode) |
 | Fine-grained PAT | `AGENT_DISPATCH_TOKEN` | `kewalaka/avm-contributions` only (Actions:RW, Contents:R, Metadata:R) | `tools/dispatch_ci.py` — never touches other repos |
-| Azure workload identity | — (DefaultAzureCredential) | Foundry AI project | `agents/base.py::create_specialist` |
+| Azure workload identity | — (DefaultAzureCredential) | Foundry AI project | `agents/base.py::create_specialist`, `runtime/foundry.py` |
+| Foundry project connection | `GITHUB_MCP_CONNECTION_ID` | GitHub MCP server (Foundry-managed OAuth) | `runtime/foundry.py::build_mcp_tools` — Foundry-hosted mode only |
+| Foundry project connection | `AZURE_MCP_CONNECTION_ID` | Azure MCP server | `runtime/foundry.py::build_mcp_tools` — Foundry-hosted mode only |
 
 Required env vars:
 
@@ -91,6 +123,12 @@ Required env vars:
 AZURE_AI_PROJECT_ENDPOINT   # Foundry project endpoint URL
 MODEL_DEPLOYMENT_NAME       # defaults to gpt-4.1
 AGENT_DISPATCH_TOKEN        # fine-grained PAT (see above)
+
+# Optional — Foundry-hosted mode only:
+FOUNDRY_HOSTED              # set to 'true' to enable MCP injection
+GITHUB_MCP_CONNECTION_ID    # Foundry connection name for GitHub MCP
+AZURE_MCP_CONNECTION_ID     # Foundry connection name for Azure MCP
+EVA_MCP_SERVER_URL          # URL for EVA/AzAPI MCP server
 ```
 
 ---
@@ -177,3 +215,6 @@ Phase 5 E2E smoke (`Azure/terraform-azurerm-avm-res-app-managedenvironment` issu
 - **`existing-pr` PR lookup**: with `--fork-owner`, looks in the fork repo (for fork-internal draft PRs), not upstream. Without it, looks in upstream. This is intentional.
 - **`dispatch_upgrade_test` is unwired**: the function exists in `tools/dispatch_ci.py` but is never called by the orchestrator (issue #16).
 - **`chat` is the bare default**: running `python main.py` with no subcommand launches `chat`, not `dev`.
+- **MCP tools require Foundry connection setup**: `GITHUB_MCP_CONNECTION_ID` must be a valid Foundry project connection name, not a PAT or token. Create the connection in your Foundry project before setting the env var. In local mode, the `gh` CLI tools in `tools/github_ops.py` are used instead.
+- **MCPTool injection is additive**: `create_specialist()` appends MCP tools to whatever `tools` list is passed — it does not replace local tools. This means both local `@ai_function` tools and MCP tools are available to agents in Foundry-hosted mode.
+- **Reviewer agent suppresses MCP tools**: `review_diff()` explicitly passes `mcp_tools=[]` to `create_specialist()` so the Reviewer never gets GitHub or Azure MCP access. The Reviewer only performs static diff analysis and does not need server-side tool access; suppressing MCP injection reduces the agent's attack surface.
