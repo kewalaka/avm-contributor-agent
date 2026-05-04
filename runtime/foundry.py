@@ -97,28 +97,27 @@ def create_agent(instructions: str) -> tuple[AIProjectClient, PromptAgentDefinit
 def run(client, agent_def) -> None:
     """Run the Foundry-hosted agent.
 
-    In hosted mode, the agent is managed by the Foundry platform.
-    This function creates a thread and starts processing.
+    In hosted mode, the agent is served via the Responses API hosting adapter
+    so Foundry can route requests to it. The ``ResponsesHostServer`` wraps the
+    agent and exposes the Responses API endpoint.
     """
-    # TODO: Wire up proper Foundry thread execution using client & agent_def.
-    # This is a placeholder — full A2A wiring is planned for Phase 4.
-    logger.warning(
-        "Foundry run() is a scaffold; client and agent_def are not yet wired. "
-        "See ROADMAP.md Phase 4 for planned A2A integration."
-    )
-    from azure.ai.agentserver.agentframework import from_agent_framework
-    from agent_framework import ChatAgent
-    from agent_framework.azure import AzureAIAgentClient
+    import asyncio
 
-    # For hosted mode, we still use the agent-framework server adapter
-    # but with MCP tools configured via the Foundry API
-    agent = ChatAgent(
-        chat_client=AzureAIAgentClient(
+    from agent_framework_foundry_hosting import ResponsesHostServer
+    from agent_framework import Agent
+    from agent_framework.azure import FoundryChatClient
+
+    # Build an agent using the same Foundry project credentials used above.
+    agent = Agent(
+        chat_client=FoundryChatClient(
             project_endpoint=config.project_endpoint,
             model_deployment_name=config.model_deployment_name,
             credential=DefaultAzureCredential(),
         ),
-        instructions="",  # Instructions set via Foundry agent definition
+        instructions="",  # Instructions are managed via the Foundry agent definition
         tools=[],
     )
-    from_agent_framework(agent).run()
+
+    server = ResponsesHostServer(agent)
+    logger.info("Starting Foundry-hosted ResponsesHostServer")
+    asyncio.run(server.run_async())

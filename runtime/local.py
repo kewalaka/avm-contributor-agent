@@ -49,7 +49,23 @@ def run(agent: ChatAgent, initial_message: str | None = None) -> None:
 
         asyncio.run(_run_batch())
     else:
-        # Interactive mode: start the server
-        from azure.ai.agentserver.agentframework import from_agent_framework
+        # Interactive REPL mode: read from stdin and send to agent
+        import asyncio
+        import logging
 
-        from_agent_framework(agent).run()
+        logger = logging.getLogger(__name__)
+        logger.info("Starting local interactive mode — type your message and press Enter (Ctrl-C to exit)")
+
+        async def _repl() -> None:
+            while True:
+                try:
+                    user_input = input("\nYou: ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    break
+                if not user_input:
+                    continue
+                response = await agent.get_response(user_input)
+                print(f"\nAgent: {response}")
+
+        asyncio.run(_repl())

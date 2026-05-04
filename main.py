@@ -288,6 +288,12 @@ def run_dev(args: argparse.Namespace) -> None:
         max_ci_retries=args.max_retries,
     )
 
+    # If --resume is provided, reuse the existing run_id so the orchestrator
+    # can recover workspace state from the durable event log.
+    if args.resume:
+        dev_request.run_id = args.resume
+        logger.info("Resuming pipeline run: %s", args.resume)
+
     try:
         dev_request.validate()
     except ValueError as exc:

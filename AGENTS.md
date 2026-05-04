@@ -66,7 +66,9 @@ python main.py test  # legacy test-only path (preserved; separate from dev pipel
 | `agents/prompts/developer-additive.md` | Appended to module SKILL.md for Developer instructions |
 | `agents/prompts/reviewer-additive.md` | Appended to reviewer skill |
 | `agents/skills/avm-review-skill.md` | Static AVM review skill (Reviewer) |
-| `tools/dispatch_ci.py` | `dispatch_module_checks`, `dispatch_module_e2e`, `dispatch_upgrade_test` — all use `AGENT_DISPATCH_TOKEN` via `urllib`, never `gh` |
+| `tools/vault.py` | `CredentialVault` — secret registry + `redact(output)` applied to all CI tool returns |
+| `tools/session_store.py` | `SessionStore` — append-only JSONL event log; `wake(run_id)` for crash recovery; `get_session_events` Developer tool |
+| `tools/dispatch_ci.py` | `dispatch_module_checks`, `dispatch_module_e2e`, `dispatch_upgrade_test` — all use `AGENT_DISPATCH_TOKEN` via `urllib`, never `gh`; all returns pass through `vault.redact()` |
 | `tools/fork_ops.py` | `ensure_fork`, `sync_fork_default_branch`, `clone_fork` |
 | `tools/git_ops.py` | `create_branch`, `commit_files`, `push_branch` (5 guardrails), `verify_branch_provenance` |
 | `tools/github_ops.py` | `create_pull_request`, `update_pr_body_section`, `flip_pr_ready`, `download_workflow_artifacts` |
@@ -115,6 +117,37 @@ All agent work happens under `~/.tfdev/ws/<run_id>/<repo_name>/`.
 - **Commits**: Conventional Commits + trailers `Co-authored-by: Copilot <...>` and `Agent-Run-Id: <full_run_id>`
 - **PR body**: managed regions `<!-- agent:summary -->…<!-- /agent:summary -->` and `<!-- agent:evidence -->…<!-- /agent:evidence -->`; everything outside those markers is human territory; never overwrite
 - **PR lifecycle**: open as draft → flip to ready only when CI is green (`flip_pr_ready`)
+
+---
+
+## Session event log and crash recovery
+
+`tools/session_store.py` — durable JSONL event log at `~/.tfdev/ws/<run_id>/events.jsonl`.
+
+The event log is **not** the model's context window — it is a backing store that the harness slices on demand. This enables crash recovery without re-feeding the full history to the model.
+
+Key events written by `run_developer_pipeline`:
+
+| Event type | Written when |
+| ---------- | ------------ |
+| `pipeline_started` | At the top of `run_developer_pipeline` |
+| `workspace_prepared` | After fork/clone/branch setup |
+| `attempt_started` | At the start of each Developer attempt |
+| `diff_reviewed` | After the Reviewer returns a verdict |
+| `pr_opened` | After the draft PR is created |
+| `pipeline_completed` | On success |
+
+**Resume**: `python main.py dev --resume <RUN_ID> --upstream-repo ... --issue N` re-uses the existing workspace by overriding the run_id.  If a `workspace_prepared` event is found the fork/clone step is skipped.
+
+The `get_session_events` `@ai_function` tool is available to the Developer agent to review prior events without flooding the context window.
+
+---
+
+## Credential redaction
+
+`tools/vault.py` — `CredentialVault` reads known secrets from env vars (`AGENT_DISPATCH_TOKEN`, etc.) at import time. All `@ai_function` tools in `tools/dispatch_ci.py` pass their return values through `vault.redact()` via `_safe_return()` before handing them back to the model.
+
+Interface-compatible with a future Azure Key Vault backend.
 
 ---
 
