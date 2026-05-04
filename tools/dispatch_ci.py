@@ -19,7 +19,9 @@ from tools.vault import vault
 
 def _safe_return(data: dict) -> str:
     """Serialise *data* to JSON and redact any known secrets before returning."""
-    return vault.redact(json.dumps(data))
+    result = vault.redact(json.dumps(data))
+    # vault.redact returns the same str when given a str (type narrowing)
+    return result if isinstance(result, str) else json.dumps(data)
 
 _TARGET_REPO = "kewalaka/avm-contributions"
 

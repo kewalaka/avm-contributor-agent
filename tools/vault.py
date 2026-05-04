@@ -38,6 +38,11 @@ class CredentialVault:
     ``***REDACTED***`` when :meth:`redact` is called. Only values
     longer than 4 characters are tracked to avoid false-positive
     redaction of short default values or placeholders.
+
+    Parameters:
+        extra_secrets: Optional additional name→value mappings to register
+            at construction time, supplementing the standard env-var scan.
+            Useful for dynamically obtained tokens (e.g. from an auth call).
     """
 
     def __init__(self, extra_secrets: dict[str, str] | None = None) -> None:
@@ -59,7 +64,7 @@ class CredentialVault:
         """Return the secret value for a logical name, or empty string."""
         return self._secrets.get(name, "")
 
-    def redact(self, output: str) -> str:
+    def redact(self, output: object) -> object:
         """Replace all known secret values in *output* with ``***REDACTED***``.
 
         Non-string inputs are returned unchanged so callers do not need

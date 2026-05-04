@@ -118,10 +118,11 @@ class SessionStore:
     def wake(cls, run_id: str) -> "SessionStore":
         """Load (or create) the :class:`SessionStore` for *run_id*.
 
-        If the events file already exists the returned store can be used
-        to read prior events and continue appending.  If the file does
-        not exist a new empty store is returned, identical to
-        ``SessionStore(run_id)``.
+        The ``wake`` factory is a named entry point for the resume pattern:
+        the harness calls ``SessionStore.wake(run_id)`` to signal intent to
+        replay / continue an existing session.  If the events file does not
+        yet exist a new empty store is returned (identical to the constructor),
+        so callers need not check for existence before calling.
         """
         return cls(run_id)
 
@@ -149,7 +150,8 @@ def get_session_events(run_id: str, start: int = 0, end: int = 50) -> str:
     Args:
         run_id: The pipeline run identifier (printed at pipeline start).
         start: Start index, 0-based (default 0).
-        end: End index, exclusive (default 50).
+        end: End index, exclusive (default 50 — a context-window-friendly
+            slice; increase to retrieve more events from long-running runs).
 
     Returns:
         JSON object with ``run_id``, ``events`` list, and ``count``.

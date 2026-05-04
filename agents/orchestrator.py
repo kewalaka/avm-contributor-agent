@@ -648,11 +648,10 @@ async def run_developer_pipeline(request: DevRequest) -> dict:
     # On resume, restore any PR that was already opened in a prior run
     if not pr_url:
         pr_event = session.last_event("pr_opened")
-        if pr_event:
-            pr_url = pr_event.get("pr_url", "")
+        if pr_event and pr_event.get("pr_url"):
+            pr_url = pr_event["pr_url"]
             pr_number = pr_event.get("pr_number")
-            if pr_url:
-                logger.info("Resuming: restoring PR %s from event log", pr_url)
+            logger.info("Resuming: restoring PR %s from event log", pr_url)
 
     # Step 3 — Developer → Reviewer → Push loop (max _MAX_ATTEMPTS)
     attempts: list[FixAttempt] = []

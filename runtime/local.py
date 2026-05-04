@@ -65,7 +65,11 @@ def run(agent: ChatAgent, initial_message: str | None = None) -> None:
                     break
                 if not user_input:
                     continue
-                response = await agent.get_response(user_input)
-                print(f"\nAgent: {response}")
+                try:
+                    response = await agent.get_response(user_input)
+                    print(f"\nAgent: {response}")
+                except Exception as exc:
+                    logger.error("Agent error: %s", exc)
+                    print(f"\n[error] {exc}")
 
         asyncio.run(_repl())
