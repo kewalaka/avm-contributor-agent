@@ -38,6 +38,7 @@ from tools.module_discovery import (
     read_module_skill,
 )
 from tools.analysis import read_upgrade_doc, summarise_plan_json
+from tools.session_store import SessionStore, get_session_events
 
 logger = logging.getLogger(__name__)
 
@@ -294,6 +295,7 @@ DEVELOPER_TOOLS = [
     add_issue_comment,
     search_github_issues,
     get_latest_release,
+    get_session_events,
 ]
 
 
@@ -455,11 +457,43 @@ async def run_developer_pipeline(request: DevRequest) -> dict:
     except ValueError as exc:
         return {"outcome": "error", "errors": [str(exc)]}
 
+    # Initialise durable event log (append-only JSONL backed by ~/.tfdev/ws/<run_id>/)
+    session = SessionStore.wake(request.run_id)
+
     repo_name = request.upstream_repo.split("/")[-1]
     fork_owner = request.fork_owner or ""
 
+    # Log pipeline start (idempotent — safe to log on resume because every run
+    # appends a new entry; callers reading the log use find_event/last_event)
+    session.append(
+        "pipeline_started",
+        upstream_repo=request.upstream_repo,
+        mode=request.mode,
+        issue_number=request.issue_number,
+        pr_number=request.pr_number,
+        local_path=request.local_path,
+        fork_owner=fork_owner,
+        base_ref=request.base_ref,
+    )
+
+    # ------------------------------------------------------------------
     # Step 1 — Prepare workspace (mode-dependent)
-    if request.mode == "existing-repo":
+    #
+    # On resume: if a workspace_prepared checkpoint already exists for this
+    # run_id, skip fork/clone and restore workspace state from the event log.
+    # ------------------------------------------------------------------
+    wp_event = session.last_event("workspace_prepared")
+    if wp_event:
+        # Resume path: reuse the previously prepared workspace
+        workspace_path = wp_event["workspace_path"]
+        branch_name = wp_event["branch_name"]
+        fork_owner = wp_event.get("fork_owner", fork_owner)
+        fork_repo = wp_event.get("fork_repo", f"{fork_owner}/{repo_name}")
+        logger.info(
+            "Resuming run %s: workspace=%s branch=%s",
+            request.run_id, workspace_path, branch_name,
+        )
+    elif request.mode == "existing-repo":
         # Clone the user's local checkout into the isolated workspace (~/.tfdev/ws/).
         # Only committed changes are visible in the clone; uncommitted work must be
         # committed locally first.
@@ -482,6 +516,13 @@ async def run_developer_pipeline(request: DevRequest) -> dict:
                 return {"outcome": "error", "errors": [f"create_branch failed: {branch_result}"]}
 
         logger.info("existing-repo mode: workspace=%s branch=%s", workspace_path, branch_name)
+        session.append(
+            "workspace_prepared",
+            workspace_path=workspace_path,
+            branch_name=branch_name,
+            fork_owner=fork_owner,
+            fork_repo=fork_repo,
+        )
 
     elif request.mode == "existing-pr":
         # Determine which repo hosts the PR.
@@ -535,6 +576,13 @@ async def run_developer_pipeline(request: DevRequest) -> dict:
             "existing-pr mode: workspace=%s new branch=%s (from PR head %s)",
             workspace_path, branch_name, head_ref_name,
         )
+        session.append(
+            "workspace_prepared",
+            workspace_path=workspace_path,
+            branch_name=branch_name,
+            fork_owner=fork_owner,
+            fork_repo=fork_repo,
+        )
 
     else:
         # issue-driven — original fork/clone behaviour
@@ -574,6 +622,14 @@ async def run_developer_pipeline(request: DevRequest) -> dict:
         if branch_result.get("status") != "created":
             return {"outcome": "error", "errors": [f"create_branch failed: {branch_result}"]}
 
+        session.append(
+            "workspace_prepared",
+            workspace_path=workspace_path,
+            branch_name=branch_name,
+            fork_owner=fork_owner,
+            fork_repo=fork_repo,
+        )
+
     # Fetch issue context once for the reviewer
     issue_context = ""
     if request.issue_number is not None:
@@ -589,6 +645,14 @@ async def run_developer_pipeline(request: DevRequest) -> dict:
         pr_url = f"https://github.com/{request.upstream_repo}/pull/{request.pr_number}"
         pr_number = request.pr_number
 
+    # On resume, restore any PR that was already opened in a prior run
+    if not pr_url:
+        pr_event = session.last_event("pr_opened")
+        if pr_event and pr_event.get("pr_url"):
+            pr_url = pr_event["pr_url"]
+            pr_number = pr_event.get("pr_number")
+            logger.info("Resuming: restoring PR %s from event log", pr_url)
+
     # Step 3 — Developer → Reviewer → Push loop (max _MAX_ATTEMPTS)
     attempts: list[FixAttempt] = []
     previous_feedback: list[str] = []
@@ -596,6 +660,7 @@ async def run_developer_pipeline(request: DevRequest) -> dict:
     for attempt_number in range(1, _MAX_ATTEMPTS + 1):
         logger.info("Pipeline attempt %d/%d", attempt_number, _MAX_ATTEMPTS)
         attempt = FixAttempt(attempt_number=attempt_number, branch_name=branch_name)
+        session.append("attempt_started", attempt_number=attempt_number)
 
         # a. Developer turn
         developer = create_specialist("developer", developer_instructions, DEVELOPER_TOOLS)
@@ -639,6 +704,12 @@ async def run_developer_pipeline(request: DevRequest) -> dict:
         attempt.reviewer_verdict = review.verdict
         attempt.reviewer_notes = review.reviewer_notes
         logger.info("Reviewer verdict (attempt %d): %s", attempt_number, review.verdict)
+        session.append(
+            "diff_reviewed",
+            attempt_number=attempt_number,
+            verdict=review.verdict,
+            issues=list(review.issues or []),
+        )
 
         # d. Reviewer approved — push, open PR, dispatch CI
         if review.approved:
@@ -679,6 +750,7 @@ async def run_developer_pipeline(request: DevRequest) -> dict:
                     pr_url = pr_result["url"]
                     pr_number = _pr_number_from_url(pr_url)
                     logger.info("Draft PR opened: %s", pr_url)
+                    session.append("pr_opened", pr_url=pr_url, pr_number=pr_number)
                 else:
                     logger.warning("create_pull_request failed: %s", pr_result)
 
@@ -748,6 +820,12 @@ async def run_developer_pipeline(request: DevRequest) -> dict:
                 logger.info("PR flipped ready: %s", flip_result.get("status"))
 
             attempts.append(attempt)
+            session.append(
+                "pipeline_completed",
+                outcome="success",
+                pr_url=pr_url,
+                attempt_number=attempt_number,
+            )
             return {
                 "outcome": "success",
                 "pr_url": pr_url,

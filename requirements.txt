@@ -1,4 +1,4 @@
-azure-ai-agentserver-agentframework
+agent-framework-foundry-hosting
 azure-ai-projects>=2.0.0
 azure-identity
 agent-framework

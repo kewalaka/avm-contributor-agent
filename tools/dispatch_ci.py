@@ -14,6 +14,15 @@ from pathlib import Path
 
 from agent_framework import ai_function
 
+from tools.vault import vault
+
+
+def _safe_return(data: dict) -> str:
+    """Serialise *data* to JSON and redact any known secrets before returning."""
+    result = vault.redact(json.dumps(data))
+    # vault.redact returns the same str when given a str (type narrowing)
+    return result if isinstance(result, str) else json.dumps(data)
+
 _TARGET_REPO = "kewalaka/avm-contributions"
 
 
@@ -220,13 +229,13 @@ def dispatch_module_checks(
         },
     )
     if dispatch_result["status"] != "dispatched":
-        return json.dumps({"status": "error", "dispatch_id": dispatch_id, **dispatch_result})
+        return _safe_return({"status": "error", "dispatch_id": dispatch_id, **dispatch_result})
 
     gha_run_id = _find_triggered_run(
         "checks.yml", dispatch_result["timestamp"], timeout_s=120
     )
     if not gha_run_id:
-        return json.dumps({
+        return _safe_return({
             "status": "error",
             "dispatch_id": dispatch_id,
             "details": "Could not find triggered workflow run within timeout",
@@ -236,7 +245,7 @@ def dispatch_module_checks(
     artifact_result = _download_artifacts(gha_run_id, "check-report", artifacts_dir)
 
     conclusion = run_result.get("conclusion", "unknown")
-    return json.dumps({
+    return _safe_return({
         "status": "success" if conclusion == "success" else "failure",
         "dispatch_id": dispatch_id,
         "gha_run_id": gha_run_id,
@@ -281,13 +290,13 @@ def dispatch_module_e2e(
         },
     )
     if dispatch_result["status"] != "dispatched":
-        return json.dumps({"status": "error", "dispatch_id": dispatch_id, **dispatch_result})
+        return _safe_return({"status": "error", "dispatch_id": dispatch_id, **dispatch_result})
 
     gha_run_id = _find_triggered_run(
         "e2e-tests.yml", dispatch_result["timestamp"], timeout_s=120
     )
     if not gha_run_id:
-        return json.dumps({
+        return _safe_return({
             "status": "error",
             "dispatch_id": dispatch_id,
             "details": "Could not find triggered workflow run within timeout",
@@ -297,7 +306,7 @@ def dispatch_module_e2e(
     artifact_result = _download_artifacts(gha_run_id, "e2e-report", artifacts_dir)
 
     conclusion = run_result.get("conclusion", "unknown")
-    return json.dumps({
+    return _safe_return({
         "status": "success" if conclusion == "success" else "failure",
         "dispatch_id": dispatch_id,
         "gha_run_id": gha_run_id,
@@ -349,13 +358,13 @@ def dispatch_upgrade_test(
         },
     )
     if dispatch_result["status"] != "dispatched":
-        return json.dumps({"status": "error", "dispatch_id": dispatch_id, **dispatch_result})
+        return _safe_return({"status": "error", "dispatch_id": dispatch_id, **dispatch_result})
 
     gha_run_id = _find_triggered_run(
         "upgrade-tests.yml", dispatch_result["timestamp"], timeout_s=120
     )
     if not gha_run_id:
-        return json.dumps({
+        return _safe_return({
             "status": "error",
             "dispatch_id": dispatch_id,
             "details": "Could not find triggered workflow run within timeout",
@@ -365,7 +374,7 @@ def dispatch_upgrade_test(
     artifact_result = _download_artifacts(gha_run_id, "upgrade-report", artifacts_dir)
 
     conclusion = run_result.get("conclusion", "unknown")
-    return json.dumps({
+    return _safe_return({
         "status": "success" if conclusion == "success" else "failure",
         "dispatch_id": dispatch_id,
         "gha_run_id": gha_run_id,
@@ -389,7 +398,7 @@ def check_dispatch_token() -> str:
     try:
         token = _dispatch_token()
     except EnvironmentError as e:
-        return json.dumps({"status": "error", "reason": str(e)})
+        return _safe_return({"status": "error", "reason": str(e)})
 
     url = f"https://api.github.com/repos/{_TARGET_REPO}"
     req = urllib.request.Request(
@@ -403,9 +412,9 @@ def check_dispatch_token() -> str:
     try:
         with urllib.request.urlopen(req) as resp:
             if resp.status == 200:
-                return json.dumps({"status": "valid", "repo": _TARGET_REPO})
-            return json.dumps({"status": "error", "http_status": resp.status})
+                return _safe_return({"status": "valid", "repo": _TARGET_REPO})
+            return _safe_return({"status": "error", "http_status": resp.status})
     except urllib.error.HTTPError as e:
-        return json.dumps({"status": "error", "http_status": e.code, "reason": str(e)})
+        return _safe_return({"status": "error", "http_status": e.code, "reason": str(e)})
     except urllib.error.URLError as e:
-        return json.dumps({"status": "error", "reason": str(e)})
+        return _safe_return({"status": "error", "reason": str(e)})
